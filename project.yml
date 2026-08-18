@@ -20,6 +20,7 @@ schemes:
       targets:
         Larpnet: all
         LarpnetTests: [test]
+        LarpnetUITests: [test]
     run:
       config: Debug
     test:
@@ -27,6 +28,7 @@ schemes:
       gatherCoverageData: true
       targets:
         - LarpnetTests
+        - LarpnetUITests
     archive:
       config: Release
 
@@ -80,3 +82,18 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: pl.larpnet.ios.tests
         SWIFT_VERSION: "6.0"
+
+  LarpnetUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: LarpnetUITests
+    dependencies:
+      - target: Larpnet
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: pl.larpnet.ios.uitests
+        SWIFT_VERSION: "6.0"
+        TEST_TARGET_NAME: Larpnet
