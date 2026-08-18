@@ -65,6 +65,7 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(LarpnetTheme.pageBackground)
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
     }
 }

@@ -8,3 +8,6 @@ DerivedData/
 
 .DS_Store
 xcuserdata/
+
+# Local-only test account credentials -- never commit.
+.test-credentials.local

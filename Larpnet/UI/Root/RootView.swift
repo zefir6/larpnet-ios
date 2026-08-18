@@ -24,6 +24,7 @@ struct RootView: View {
                     onReply: { composeContext = ComposeContext(replyToId: $0.id) }
                 )
                 .navigationTitle("Home")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { homePath.append(.search) } label: {
@@ -47,6 +48,7 @@ struct RootView: View {
                     onReply: { composeContext = ComposeContext(replyToId: $0.id) }
                 )
                 .navigationTitle("Larpnet")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { composeContext = ComposeContext(replyToId: nil) } label: {
@@ -63,6 +65,7 @@ struct RootView: View {
                     onOpenProfile: { directoryPath.append(.profile(accountId: $0)) }
                 )
                 .navigationTitle("Directory")
+                .navigationBarTitleDisplayMode(.inline)
             }
             .tabItem { Label("Directory", systemImage: "person.2") }
 
@@ -73,6 +76,7 @@ struct RootView: View {
                     onOpenProfile: { notificationsPath.append(.profile(accountId: $0)) }
                 )
                 .navigationTitle("Notifications")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { notificationsPath.append(.messages) } label: {
