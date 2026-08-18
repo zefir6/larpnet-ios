@@ -1,0 +1,18 @@
+{
+    "id": "999001",
+    "created_at": "2026-08-18T09:15:03.512Z",
+    "content": null,
+    "spoiler_text": null,
+    "sensitive": null,
+    "visibility": null,
+    "in_reply_to_id": null,
+    "in_reply_to_account_id": null,
+    "url": null,
+    "media_attachments": null,
+    "poll": null,
+    "reblog": null,
+    "favourited": null,
+    "account": {
+        "id": "42"
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "id": "5001",
+    "sender_id": "12",
+    "recipient_id": "7",
+    "text": "see you at the larp",
+    "created_at": "Tue Aug 18 10:00:00 +0000 2026",
+    "sender_screen_name": "otheruser",
+    "recipient_screen_name": "testuser",
+    "friendica_seen": 0
+}
