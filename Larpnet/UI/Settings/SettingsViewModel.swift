@@ -1,5 +1,4 @@
 import Foundation
-import UserNotifications
 
 @MainActor
 @Observable
@@ -35,13 +34,11 @@ final class SettingsViewModel {
         pushEnabled = enabled
         if enabled {
             Task {
-                let granted = (try? await UNUserNotificationCenter.current()
-                    .requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-                if granted {
-                    BackgroundRefresh.schedule()
-                } else {
-                    pushEnabled = false
-                }
+                await BackgroundRefresh.requestAuthorizationIfNeededAndSchedule(tokenStore: appContainer.tokenStore)
+                // `requestAuthorizationIfNeededAndSchedule` may flip `tokenStore.pushEnabled`
+                // back to false (denied/not granted) -- mirror that into this view's own state
+                // so the toggle visually reflects it instead of staying stuck "on".
+                pushEnabled = appContainer.tokenStore.pushEnabled
             }
         } else {
             BackgroundRefresh.cancel()

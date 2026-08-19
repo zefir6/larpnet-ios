@@ -11,11 +11,10 @@ struct LarpnetApp: App {
         _isLoggedIn = State(initialValue: container.tokenStore.isLoggedIn)
         // Registration must happen unconditionally and before the app finishes launching --
         // BGTaskScheduler requires it during `application(_:didFinishLaunchingWithOptions:)`-
-        // equivalent startup, regardless of whether the user is logged in yet.
+        // equivalent startup, regardless of whether the user is logged in yet. Requesting
+        // notification *authorization* has to wait until `body` runs (it's async, `init()`
+        // isn't), see the `.task` below.
         BackgroundRefresh.register(appContainer: container)
-        if container.tokenStore.isLoggedIn, container.tokenStore.pushEnabled {
-            BackgroundRefresh.schedule()
-        }
     }
 
     var body: some Scene {
@@ -26,7 +25,11 @@ struct LarpnetApp: App {
                 } else {
                     LoginView(appContainer: appContainer, onLoggedIn: {
                         isLoggedIn = true
-                        if appContainer.tokenStore.pushEnabled { BackgroundRefresh.schedule() }
+                        Task {
+                            await BackgroundRefresh.requestAuthorizationIfNeededAndSchedule(
+                                tokenStore: appContainer.tokenStore
+                            )
+                        }
                     })
                 }
             }
@@ -34,6 +37,14 @@ struct LarpnetApp: App {
             .environment(\.font, LarpnetTheme.bodyFont)
             .dynamicTypeSize(.medium)
             .tint(LarpnetTheme.accent)
+            .task {
+                // Covers the "already logged in, relaunching the app" path -- fresh logins are
+                // handled by `onLoggedIn` above instead, since this only runs once per launch.
+                guard appContainer.tokenStore.isLoggedIn else { return }
+                await BackgroundRefresh.requestAuthorizationIfNeededAndSchedule(
+                    tokenStore: appContainer.tokenStore
+                )
+            }
         }
     }
 }

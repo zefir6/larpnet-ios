@@ -36,6 +36,43 @@ enum BackgroundRefresh {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: taskIdentifier)
     }
 
+    /// Requests notification authorization if `pushEnabled` and the system hasn't been asked
+    /// yet, then schedules the background refresh task. This is the single place that decides
+    /// whether to show the system permission prompt -- call it from every path that should
+    /// result in one: fresh login, app launch while already logged in, and the Settings push
+    /// toggle being turned on.
+    ///
+    /// Before this existed, the *only* caller was the toggle's `set` closure -- which fixed
+    /// nothing for a fresh install, since `TokenStore.pushEnabled` already defaults to `true`
+    /// and a SwiftUI `Toggle` only invokes its binding's setter on actual user interaction, not
+    /// from that initial `true` value being rendered. So first-launch users were never actually
+    /// asked; the prompt only ever appeared after manually turning the toggle off and back on,
+    /// which is exactly the bug this fixes.
+    @MainActor
+    static func requestAuthorizationIfNeededAndSchedule(tokenStore: TokenStore) async {
+        guard tokenStore.pushEnabled else { return }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            if granted {
+                schedule()
+            } else {
+                tokenStore.pushEnabled = false
+            }
+        case .authorized, .provisional, .ephemeral:
+            schedule()
+        case .denied:
+            // Previously granted then revoked in iOS Settings -- reflect that back into our
+            // own toggle rather than silently scheduling a task whose notifications can never
+            // actually show.
+            tokenStore.pushEnabled = false
+        @unknown default:
+            break
+        }
+    }
+
     private static func handle(task: BGAppRefreshTask, appContainer: AppContainer) {
         // Reschedule at the *start* of the handler -- a suspended/killed task never
         // reschedules otherwise, silently ending the polling cycle for good.
