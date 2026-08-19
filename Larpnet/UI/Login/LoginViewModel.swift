@@ -16,7 +16,7 @@ enum LoginUIState: Equatable {
 @MainActor
 @Observable
 final class LoginViewModel {
-    var instanceInput: String = "larpnet.pl"
+    var instanceInput: String
     private(set) var uiState: LoginUIState = .idle
 
     private let oAuthFlow: OAuthFlow
@@ -25,6 +25,10 @@ final class LoginViewModel {
     init(oAuthFlow: OAuthFlow, tokenStore: TokenStore) {
         self.oAuthFlow = oAuthFlow
         self.tokenStore = tokenStore
+        // Prefills with whatever was last used successfully (Settings' "Server" control, or
+        // simply the last instance logged into) -- falls back to the baked-in default
+        // (`TokenStore.defaultInstance`, "larpnet.pl") until either of those has ever run.
+        self.instanceInput = tokenStore.preferredInstance
     }
 
     func login() {
@@ -33,6 +37,7 @@ final class LoginViewModel {
         Task {
             do {
                 try await oAuthFlow.login(instanceInput: instanceInput)
+                tokenStore.preferredInstance = instanceInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 uiState = .exchangingToken
                 uiState = .loggedIn
             } catch OAuthFlow.OAuthError.cancelled {

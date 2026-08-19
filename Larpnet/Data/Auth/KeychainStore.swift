@@ -65,11 +65,17 @@ final class TokenStore: @unchecked Sendable {
     private let keychain = KeychainStore()
     private let defaults = UserDefaults.standard
 
+    /// The baked-in default server -- what a fresh install's login screen prefills, and what
+    /// `preferredInstance` falls back to until the user changes it (in Settings, or simply by
+    /// logging into a different instance).
+    static let defaultInstance = "larpnet.pl"
+
     private enum Key {
         static let instanceBaseURL = "instance_base_url"
         static let clientId = "client_id"
         static let clientSecret = "client_secret"
         static let accessToken = "access_token"
+        static let preferredInstance = "preferred_instance"
     }
 
     var instanceBaseURL: String? {
@@ -97,6 +103,17 @@ final class TokenStore: @unchecked Sendable {
     var pushEnabled: Bool {
         get { defaults.object(forKey: "push_enabled") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "push_enabled") }
+    }
+
+    /// The bare domain (e.g. "larpnet.pl", not a full URL) the login screen prefills and
+    /// Settings' "Server" control edits. Not a secret, so `UserDefaults`, not Keychain --
+    /// and deliberately *not* cleared by `clear()`: it's what the *next* login uses, so wiping
+    /// it on logout would defeat the point of remembering it. Falls back to `defaultInstance`
+    /// until the user changes it in Settings or simply logs into a different instance (a
+    /// successful login updates this to match, so it always reflects "what to try next").
+    var preferredInstance: String {
+        get { defaults.string(forKey: Key.preferredInstance) ?? Self.defaultInstance }
+        set { defaults.set(newValue, forKey: Key.preferredInstance) }
     }
 
     var isLoggedIn: Bool {

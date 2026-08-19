@@ -6,13 +6,27 @@ import SwiftUI
 /// anything with no API route, logout.
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
+    @State private var serverInput: String
+    @State private var showingChangeServerConfirmation = false
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
 
     init(appContainer: AppContainer, onLoggedOut: @escaping () -> Void) {
         self.appContainer = appContainer
         _viewModel = State(initialValue: SettingsViewModel(appContainer: appContainer))
+        _serverInput = State(initialValue: appContainer.tokenStore.preferredInstance)
         self.onLoggedOut = onLoggedOut
+    }
+
+    /// The domain actually authenticated against right now (falls back to the not-yet-logged-in
+    /// preferred instance, though this view is only ever shown while logged in).
+    private var currentInstanceHost: String {
+        appContainer.tokenStore.instanceBaseURL.flatMap { URL(string: $0)?.host }
+            ?? appContainer.tokenStore.preferredInstance
+    }
+
+    private var trimmedServerInput: String {
+        serverInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -52,6 +66,21 @@ struct SettingsView: View {
             .onChange(of: viewModel.discoverable) { _, _ in viewModel.savePrivacy() }
             .onChange(of: viewModel.bot) { _, _ in viewModel.savePrivacy() }
 
+            Section {
+                TextField("Instance (e.g. larpnet.pl)", text: $serverInput)
+                    .textFieldStyle(.plain)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Change Server") {
+                    showingChangeServerConfirmation = true
+                }
+                .disabled(trimmedServerInput.isEmpty || trimmedServerInput == currentInstanceHost)
+            } header: {
+                Text("Server")
+            } footer: {
+                Text("Currently connected to \(currentInstanceHost). Changing this logs you out -- you'll sign back in against the new server.")
+            }
+
             if let webSettingsURL = viewModel.webSettingsURL {
                 Section {
                     Link("Open web settings", destination: webSettingsURL)
@@ -77,5 +106,15 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
+        .alert("Change Server?", isPresented: $showingChangeServerConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Change & Log Out", role: .destructive) {
+                appContainer.tokenStore.preferredInstance = trimmedServerInput
+                appContainer.tokenStore.clear()
+                onLoggedOut()
+            }
+        } message: {
+            Text("You'll be logged out of \(currentInstanceHost) and returned to the login screen to sign in to \(trimmedServerInput).")
+        }
     }
 }
