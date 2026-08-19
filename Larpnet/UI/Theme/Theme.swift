@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Colors and type lifted directly from the production web theme (`friendica-larpnet`'s
 /// `view/theme/larpnet_notifications`, fetched live from `larpnet.pl`'s computed
@@ -12,13 +13,20 @@ import SwiftUI
 ///   - base font: "Open Sans" (bundled -- `Resources/Fonts/`), at a base size a little under
 ///     iOS's default to match the web theme's Bootstrap-3-derived 14px base (smaller than a
 ///     browser's 16px default, same relative step taken here off iOS's 17pt body default).
+///
+/// `pageBackground`/`cardBackground` are dynamic (light/dark variants) -- every screen's actual
+/// text relies on SwiftUI's normal adaptive colors (`.secondary`, default label, etc.), which
+/// correctly turn white in dark mode. Leaving these two backgrounds hardcoded to their
+/// light-mode web values would put that adaptive white text on a background that never got the
+/// memo, which is exactly the white-on-white bug this fixes. `accent`/`navBar` stay constant
+/// across modes deliberately -- one brand purple with enough contrast against both a light and
+/// a near-black surface, same as most apps' single accent color.
 enum LarpnetTheme {
     static let accent = Color(hex: 0xA54BAD)
     static let accentHover = Color(hex: 0x94439B)
     static let navBar = Color(hex: 0x833C89)
-    static let pageBackground = Color(hex: 0xEDEDED)
-    static let cardBackground = Color.white
-    static let bodyText = Color(hex: 0x444444)
+    static let pageBackground = Color(light: 0xEDEDED, dark: 0x000000)
+    static let cardBackground = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
 
     enum FontName {
         static let regular = "OpenSans"
@@ -42,6 +50,14 @@ extension Color {
             green: Double((hex >> 8) & 0xFF) / 255,
             blue: Double(hex & 0xFF) / 255
         )
+    }
+
+    /// A color that switches between `light`/`dark` hex values based on the current trait
+    /// environment (system Light/Dark Mode, or a view's own `.preferredColorScheme` override).
+    init(light: UInt32, dark: UInt32) {
+        self.init(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(Color(hex: dark)) : UIColor(Color(hex: light))
+        })
     }
 }
 

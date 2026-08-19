@@ -27,48 +27,79 @@ final class LoginFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
+        // The OAuth access token lives in Keychain, which -- unlike the app's container --
+        // survives a plain reinstall (that's the whole point of using Keychain for it), so a
+        // "fresh" install can still land straight on the logged-in timeline instead of the
+        // login screen. Only drive the login form if it's actually showing.
         let loginButton = app.buttons["Log in"]
-        XCTAssertTrue(loginButton.waitForExistence(timeout: 10), "Login screen did not appear")
-        loginButton.tap()
+        if loginButton.waitForExistence(timeout: 8) {
+            loginButton.tap()
 
-        // ASWebAuthenticationSession's "wants to use X to sign in" system consent alert --
-        // shown intermittently depending on OS/account state, so this is opportunistic, not
-        // asserted.
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let systemContinue = springboard.buttons["Continue"]
-        if systemContinue.waitForExistence(timeout: 5) {
-            systemContinue.tap()
-        }
+            // ASWebAuthenticationSession's "wants to use X to sign in" system consent alert --
+            // shown intermittently depending on OS/account state, so this is opportunistic,
+            // not asserted.
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let systemContinue = springboard.buttons["Continue"]
+            if systemContinue.waitForExistence(timeout: 5) {
+                systemContinue.tap()
+            }
 
-        // The login form is server-rendered HTML inside the authentication sheet's web view --
-        // field order (username, then password) is stable regardless of exact accessibility
-        // labeling, so index into webViews rather than relying on a label match.
-        let usernameField = app.webViews.textFields.element(boundBy: 0)
-        XCTAssertTrue(usernameField.waitForExistence(timeout: 15), "Login form did not appear in the auth sheet")
-        usernameField.tap()
-        usernameField.typeText(username)
+            // The login form is server-rendered HTML inside the authentication sheet's web
+            // view -- field order (username, then password) is stable regardless of exact
+            // accessibility labeling, so index into webViews rather than relying on a label
+            // match.
+            let usernameField = app.webViews.textFields.element(boundBy: 0)
+            XCTAssertTrue(usernameField.waitForExistence(timeout: 15), "Login form did not appear in the auth sheet")
+            usernameField.tap()
+            usernameField.typeText(username)
 
-        let passwordField = app.webViews.secureTextFields.element(boundBy: 0)
-        XCTAssertTrue(passwordField.waitForExistence(timeout: 5))
-        passwordField.tap()
-        passwordField.typeText(password)
+            let passwordField = app.webViews.secureTextFields.element(boundBy: 0)
+            XCTAssertTrue(passwordField.waitForExistence(timeout: 5))
+            passwordField.tap()
+            passwordField.typeText(password)
 
-        let signInButton = app.webViews.buttons["Sign in"]
-        XCTAssertTrue(signInButton.waitForExistence(timeout: 5))
-        signInButton.tap()
+            let signInButton = app.webViews.buttons["Sign in"]
+            XCTAssertTrue(signInButton.waitForExistence(timeout: 5))
+            signInButton.tap()
 
-        // First-time authorization consent page ("Do you want to authorize this application
-        // ...?" / Yes / No) -- only appears if this app+account combination hasn't already
-        // acknowledged it, so this step is opportunistic too.
-        let authorizeYes = app.webViews.buttons["Yes"]
-        if authorizeYes.waitForExistence(timeout: 8) {
-            authorizeYes.tap()
+            // First-time authorization consent page ("Do you want to authorize this
+            // application ...?" / Yes / No) -- only appears if this app+account combination
+            // hasn't already acknowledged it, so this step is opportunistic too.
+            let authorizeYes = app.webViews.buttons["Yes"]
+            if authorizeYes.waitForExistence(timeout: 8) {
+                authorizeYes.tap()
+            }
         }
 
         let homeTab = app.tabBars.buttons["Home"]
         XCTAssertTrue(homeTab.waitForExistence(timeout: 20), "Did not reach the logged-in timeline")
         sleep(2)
         attachScreenshot(named: "Home Timeline", of: app)
+
+        // Open the first post's thread (tap the relative-time label rather than the account
+        // row, which is its own button that would navigate to the profile instead) and the
+        // compose sheet -- both use `.larpnetCard()`, the exact surface the dark-mode fix
+        // targets, so they're worth a dedicated screenshot alongside the tab roots.
+        let firstPostTimestamp = app.staticTexts.matching(NSPredicate(format: "label MATCHES '\\\\d+[hmd]|now'")).firstMatch
+        if firstPostTimestamp.waitForExistence(timeout: 5) {
+            firstPostTimestamp.tap()
+            sleep(2)
+            attachScreenshot(named: "Thread", of: app)
+            app.navigationBars.buttons.firstMatch.tap()
+            sleep(1)
+        }
+
+        let composeButton = app.buttons["Compose"]
+        if composeButton.waitForExistence(timeout: 5) {
+            composeButton.tap()
+            sleep(2)
+            attachScreenshot(named: "Compose", of: app)
+            let cancelButton = app.buttons["Cancel"]
+            if cancelButton.waitForExistence(timeout: 3) {
+                cancelButton.tap()
+            }
+            sleep(1)
+        }
 
         for (label, name) in [("Larpnet", "Larpnet Timeline"), ("Directory", "Directory"), ("Notifications", "Notifications"), ("Settings", "Settings")] {
             let tab = app.tabBars.buttons[label]
