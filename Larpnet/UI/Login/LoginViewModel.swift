@@ -16,7 +16,6 @@ enum LoginUIState: Equatable {
 @MainActor
 @Observable
 final class LoginViewModel {
-    var instanceInput: String
     private(set) var uiState: LoginUIState = .idle
 
     private let oAuthFlow: OAuthFlow
@@ -25,19 +24,20 @@ final class LoginViewModel {
     init(oAuthFlow: OAuthFlow, tokenStore: TokenStore) {
         self.oAuthFlow = oAuthFlow
         self.tokenStore = tokenStore
-        // Prefills with whatever was last used successfully (Settings' "Server" control, or
-        // simply the last instance logged into) -- falls back to the baked-in default
-        // (`TokenStore.defaultInstance`, "larpnet.pl") until either of those has ever run.
-        self.instanceInput = tokenStore.preferredInstance
     }
 
     func login() {
         guard uiState != .awaitingBrowser, uiState != .exchangingToken else { return }
+        // Read fresh at the moment of the tap, not cached at init -- the only way to change
+        // this is the iOS Settings app's "Larpnet" page (see `Settings.bundle/Root.plist`),
+        // which the user could easily have visited *while this screen sat backgrounded*, so
+        // caching it earlier risks logging into a stale instance.
+        let instance = tokenStore.preferredInstance
         uiState = .awaitingBrowser
         Task {
             do {
-                try await oAuthFlow.login(instanceInput: instanceInput)
-                tokenStore.preferredInstance = instanceInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                try await oAuthFlow.login(instanceInput: instance)
+                tokenStore.preferredInstance = instance.trimmingCharacters(in: .whitespacesAndNewlines)
                 uiState = .exchangingToken
                 uiState = .loggedIn
             } catch OAuthFlow.OAuthError.cancelled {

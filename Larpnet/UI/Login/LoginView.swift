@@ -17,11 +17,6 @@ struct LoginView: View {
             Text("Larpnet")
                 .font(.custom(LarpnetTheme.FontName.bold, size: 34))
                 .foregroundStyle(LarpnetTheme.navBar)
-            TextField("Instance (e.g. larpnet.pl)", text: $viewModel.instanceInput)
-                .textFieldStyle(.roundedBorder)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding(.horizontal)
 
             switch viewModel.uiState {
             case .idle:

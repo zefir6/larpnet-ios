@@ -78,6 +78,15 @@ final class TokenStore: @unchecked Sendable {
         static let preferredInstance = "preferred_instance"
     }
 
+    init() {
+        // `Settings.bundle/Root.plist`'s own `DefaultValue` for this key isn't synced into
+        // `UserDefaults` until the user actually opens the app's page in the iOS Settings app
+        // -- registering it here too means the OS Settings field (and `preferredInstance`'s
+        // own fallback below, belt-and-suspenders) both read "larpnet.pl" from first launch,
+        // not just after someone happens to open Settings once.
+        defaults.register(defaults: [Key.preferredInstance: Self.defaultInstance])
+    }
+
     var instanceBaseURL: String? {
         get { keychain.get(Key.instanceBaseURL) }
         set { keychain.set(newValue, for: Key.instanceBaseURL) }
