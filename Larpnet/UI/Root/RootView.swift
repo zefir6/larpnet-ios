@@ -12,6 +12,7 @@ struct RootView: View {
     @State private var localPath: [AppRoute] = []
     @State private var notificationsPath: [AppRoute] = []
     @State private var directoryPath: [AppRoute] = []
+    @State private var settingsPath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
 
     var body: some View {
@@ -87,9 +88,8 @@ struct RootView: View {
             }
             .tabItem { Label("Notifications", systemImage: "bell") }
 
-            NavigationStack {
+            tabStack(path: $settingsPath) {
                 SettingsView(appContainer: appContainer, onLoggedOut: onLoggedOut)
-                    .larpnetNavigationBarStyle()
             }
             .tabItem { Label("Settings", systemImage: "gear") }
         }

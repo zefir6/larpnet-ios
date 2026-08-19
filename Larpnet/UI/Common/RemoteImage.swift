@@ -34,6 +34,7 @@ final class ImageLoader: @unchecked Sendable {
 
 struct RemoteImage: View {
     let url: URL?
+    var contentMode: ContentMode = .fill
     @Environment(\.imageLoader) private var loader
     @State private var image: UIImage?
 
@@ -42,7 +43,7 @@ struct RemoteImage: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .aspectRatio(contentMode: contentMode)
             } else {
                 Color.gray.opacity(0.15)
             }

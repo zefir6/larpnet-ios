@@ -18,8 +18,18 @@ struct SettingsView: View {
     var body: some View {
         List {
             if let account = viewModel.account {
+                // `NavigationLink(value:)`, not a plain `Button` -- a `List` row's own
+                // selection gesture reliably swallows a nested `Button`'s tap (confirmed live:
+                // the button's action never fired, with no error and no fallback behavior,
+                // even though XCUITest could target and synthesize the tap correctly).
+                // `NavigationLink` is what `List` rows are actually built to host, and it
+                // hooks directly into the `navigationDestination(for: AppRoute.self)` already
+                // registered by `RootView`'s `tabStack` -- it also draws its own disclosure
+                // chevron, so the manual one this used to add is gone.
                 Section {
-                    AccountRow(account: account)
+                    NavigationLink(value: AppRoute.profile(accountId: nil)) {
+                        AccountRow(account: account)
+                    }
                 }
             }
 
