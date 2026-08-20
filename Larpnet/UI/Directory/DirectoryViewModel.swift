@@ -53,11 +53,19 @@ final class DirectoryViewModel {
         }
     }
 
+    /// See `ProfileViewModel.toggleFollow` -- same optimistic-update-plus-`requested`-state
+    /// logic, ported here separately since Directory keeps relationships in a dictionary rather
+    /// than a single optional.
     func toggleFollow(_ account: Account) {
-        let wasFollowing = relationshipsByAccountId[account.id]?.following ?? false
+        let relationship = relationshipsByAccountId[account.id]
+        let shouldFollow = relationship?.following != true && relationship?.requested != true
+        var updatedRelationship = relationship ?? Relationship(id: account.id)
+        updatedRelationship.following = shouldFollow && !account.locked
+        updatedRelationship.requested = shouldFollow && account.locked
+        relationshipsByAccountId[account.id] = updatedRelationship
         Task {
             let api = try? appContainer.friendicaAPI()
-            let updated = try? await (wasFollowing ? api?.unfollow(id: account.id) : api?.follow(id: account.id))
+            let updated = try? await (shouldFollow ? api?.follow(id: account.id) : api?.unfollow(id: account.id))
             if let updated { relationshipsByAccountId[account.id] = updated }
         }
     }

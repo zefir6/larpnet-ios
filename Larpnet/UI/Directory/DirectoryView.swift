@@ -18,11 +18,16 @@ struct DirectoryView: View {
                     }
                     .buttonStyle(.plain)
                     if let relationship = viewModel.relationshipsByAccountId[account.id] {
-                        Button(relationship.following ? "Unfollow" : "Follow") {
-                            viewModel.toggleFollow(account)
+                        let label = relationship.following ? "Unfollow" : (relationship.requested ? "Requested" : "Follow")
+                        if relationship.following || relationship.requested {
+                            Button(label) { viewModel.toggleFollow(account) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        } else {
+                            Button(label) { viewModel.toggleFollow(account) }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                     }
                 }
                 .onAppear {
