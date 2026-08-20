@@ -51,11 +51,11 @@ struct ThreadView: View {
             onOpenThread: onOpenThread,
             onOpenProfile: onOpenProfile,
             onReply: onReply,
-            onToggleFavourite: { viewModel.toggleFavourite($0) },
-            onToggleReblog: { viewModel.toggleReblog($0) },
-            onToggleBookmark: { viewModel.toggleBookmark($0) }
+            onToggleFavourite: { viewModel.toggleFavourite(id: $0) },
+            onToggleReblog: { viewModel.toggleReblog(id: $0) },
+            onToggleBookmark: { viewModel.toggleBookmark(id: $0) }
         )
-        .padding(.horizontal)
+        .padding(.horizontal, 6)
         .padding(.leading, CGFloat(depth) * 16)
     }
 }

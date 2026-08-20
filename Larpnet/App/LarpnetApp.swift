@@ -35,7 +35,6 @@ struct LarpnetApp: App {
             }
             .environment(\.imageLoader, appContainer.imageLoader)
             .environment(\.font, LarpnetTheme.bodyFont)
-            .dynamicTypeSize(.medium)
             .tint(LarpnetTheme.accent)
             .task {
                 // Covers the "already logged in, relaunching the app" path -- fresh logins are

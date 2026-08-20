@@ -10,9 +10,9 @@ import UIKit
 ///   - page background:         #ededed  (`body { background-color }`)
 ///   - card/panel background:   #ffffff  (`.panel { background-color }`, 4px radius, subtle shadow)
 ///   - body text:                #444444 (`body { color }`)
-///   - base font: "Open Sans" (bundled -- `Resources/Fonts/`), at a base size a little under
-///     iOS's default to match the web theme's Bootstrap-3-derived 14px base (smaller than a
-///     browser's 16px default, same relative step taken here off iOS's 17pt body default).
+///   - base font: "Open Sans" (bundled -- `Resources/Fonts/`), at iOS's own 17pt body default --
+///     the web theme's Bootstrap-3-derived 14px base reads as noticeably small once ported to a
+///     phone screen at native resolution, so this deliberately does not scale it down to match.
 ///
 /// `pageBackground`/`cardBackground` are dynamic (light/dark variants) -- every screen's actual
 /// text relies on SwiftUI's normal adaptive colors (`.secondary`, default label, etc.), which
@@ -36,11 +36,8 @@ enum LarpnetTheme {
     }
 
     /// The app-wide default `Text` font (see `LarpnetApp`'s `.environment(\.font, ...)`).
-    /// Explicit `.font(.headline)`/`.caption`/etc. calls elsewhere override this locally, same
-    /// as any SwiftUI environment value -- `.dynamicTypeSize(.medium)` (one notch below the
-    /// system default `.large`) is what makes *those* slightly smaller too, uniformly, without
-    /// having to touch every call site.
-    static let bodyFont = Font.custom(FontName.regular, size: 15)
+    /// Explicit `.font(.headline)`/`.caption`/etc. calls elsewhere override this locally.
+    static let bodyFont = Font.custom(FontName.regular, size: 17)
 }
 
 extension Color {

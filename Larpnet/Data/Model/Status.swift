@@ -11,6 +11,10 @@ final class Box<Value: Sendable>: Sendable {
     init(_ value: Value) { self.value = value }
 }
 
+extension Box: Equatable where Value: Equatable {
+    static func == (lhs: Box, rhs: Box) -> Bool { lhs.value == rhs.value }
+}
+
 struct MediaAttachment: Decodable, Sendable, Hashable, Identifiable {
     var id: String
     var mediaType: String
@@ -116,13 +120,23 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
         set { _reblog = newValue.map(Box.init) }
     }
 
-    // `Box` doesn't conform to Hashable/Equatable, so synthesis can't cover `_reblog` --
-    // identity by `id` (Mastodon/Friendica status ids are unique) is sufficient for this
-    // struct's actual uses (SwiftUI `List`/`ForEach` diffing, `Set`-based dedup).
+    // Must compare full content, not just `id`: SwiftUI's `ForEach`/`LazyVStack` use
+    // `Equatable` (when available) to decide whether a row actually needs to re-render, on top
+    // of `Identifiable` just matching old/new elements up by id. An id-only `==` made every
+    // optimistic favourite/reblog/bookmark update compare "equal" to the pre-toggle value, so
+    // the row's `body` never re-ran and the tap silently produced no visible change -- confirmed
+    // live by logging `StatusCard.body`'s entry: it fired once on initial layout and never again
+    // after a toggle, even though the view model's own state had genuinely flipped.
     static func == (lhs: Status, rhs: Status) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id && lhs.favourited == rhs.favourited && lhs.reblogged == rhs.reblogged
+            && lhs.bookmarked == rhs.bookmarked && lhs.favouritesCount == rhs.favouritesCount
+            && lhs.reblogsCount == rhs.reblogsCount && lhs.repliesCount == rhs.repliesCount
+            && lhs.content == rhs.content && lhs.spoilerText == rhs.spoilerText
+            && lhs.sensitive == rhs.sensitive && lhs._reblog == rhs._reblog
     }
 
+    // Equal values (checked above) always share this hash -- the reverse isn't required for
+    // `Hashable` correctness, so id-only hashing is still legal and keeps this cheap.
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }

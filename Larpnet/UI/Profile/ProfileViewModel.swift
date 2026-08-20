@@ -70,29 +70,35 @@ final class ProfileViewModel {
         }
     }
 
-    func toggleFavourite(_ status: Status) {
-        apply(status) { $0.favourited.toggle(); $0.favouritesCount += $0.favourited ? 1 : -1 }
+    /// Takes an `id`, not a `Status` snapshot -- see `TimelineViewModel`'s toggle methods for
+    /// why (a stale caller-captured `Status` can't be trusted to reflect the just-toggled
+    /// state).
+    func toggleFavourite(id: String) {
+        guard let wasFavourited = currentStatus(id: id)?.favourited else { return }
+        apply(id: id) { $0.favourited.toggle(); $0.favouritesCount += $0.favourited ? 1 : -1 }
         Task {
             let api = try? appContainer.friendicaAPI()
-            let updated = try? await (status.favourited ? api?.unfavourite(id: status.id) : api?.favourite(id: status.id))
+            let updated = try? await (wasFavourited ? api?.unfavourite(id: id) : api?.favourite(id: id))
             if let updated { replace(with: updated) }
         }
     }
 
-    func toggleReblog(_ status: Status) {
-        apply(status) { $0.reblogged.toggle(); $0.reblogsCount += $0.reblogged ? 1 : -1 }
+    func toggleReblog(id: String) {
+        guard let wasReblogged = currentStatus(id: id)?.reblogged else { return }
+        apply(id: id) { $0.reblogged.toggle(); $0.reblogsCount += $0.reblogged ? 1 : -1 }
         Task {
             let api = try? appContainer.friendicaAPI()
-            let updated = try? await (status.reblogged ? api?.unreblog(id: status.id) : api?.reblog(id: status.id))
+            let updated = try? await (wasReblogged ? api?.unreblog(id: id) : api?.reblog(id: id))
             if let updated { replace(with: updated) }
         }
     }
 
-    func toggleBookmark(_ status: Status) {
-        apply(status) { $0.bookmarked.toggle() }
+    func toggleBookmark(id: String) {
+        guard let wasBookmarked = currentStatus(id: id)?.bookmarked else { return }
+        apply(id: id) { $0.bookmarked.toggle() }
         Task {
             let api = try? appContainer.friendicaAPI()
-            let updated = try? await (status.bookmarked ? api?.unbookmark(id: status.id) : api?.bookmark(id: status.id))
+            let updated = try? await (wasBookmarked ? api?.unbookmark(id: id) : api?.bookmark(id: id))
             if let updated { replace(with: updated) }
         }
     }
@@ -102,13 +108,29 @@ final class ProfileViewModel {
         Task { try? await appContainer.friendicaAPI().deleteStatus(id: status.id) }
     }
 
-    private func apply(_ status: Status, _ mutate: (inout Status) -> Void) {
-        guard let index = statuses.firstIndex(where: { $0.id == status.id }) else { return }
-        mutate(&statuses[index])
+    /// See `TimelineViewModel.apply` -- `id` is the unwrapped status's id, but `statuses` holds
+    /// top-level entries whose id differs from a boost's wrapped `reblog.id`.
+    private func currentStatus(id: String) -> Status? {
+        guard let entry = statuses.first(where: { $0.id == id || $0.reblog?.id == id }) else { return nil }
+        return entry.id == id ? entry : entry.reblog
+    }
+
+    private func apply(id: String, _ mutate: (inout Status) -> Void) {
+        guard let index = statuses.firstIndex(where: { $0.id == id || $0.reblog?.id == id }) else { return }
+        if statuses[index].id == id {
+            mutate(&statuses[index])
+        } else if var reblog = statuses[index].reblog {
+            mutate(&reblog)
+            statuses[index].reblog = reblog
+        }
     }
 
     private func replace(with status: Status) {
-        guard let index = statuses.firstIndex(where: { $0.id == status.id }) else { return }
-        statuses[index] = status
+        guard let index = statuses.firstIndex(where: { $0.id == status.id || $0.reblog?.id == status.id }) else { return }
+        if statuses[index].id == status.id {
+            statuses[index] = status
+        } else {
+            statuses[index].reblog = status
+        }
     }
 }

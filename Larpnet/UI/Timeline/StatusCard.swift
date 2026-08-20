@@ -21,9 +21,12 @@ struct StatusCard: View {
     var onOpenThread: (Status) -> Void = { _ in }
     var onOpenProfile: (String) -> Void = { _ in }
     var onReply: (Status) -> Void = { _ in }
-    var onToggleFavourite: (Status) -> Void = { _ in }
-    var onToggleReblog: (Status) -> Void = { _ in }
-    var onToggleBookmark: (Status) -> Void = { _ in }
+    /// Toggle actions take the status's id, not a `Status` snapshot -- see
+    /// `TimelineViewModel.toggleFavourite(id:)`'s doc comment for why a snapshot captured by
+    /// this view's closures can't be trusted to reflect the current state.
+    var onToggleFavourite: (String) -> Void = { _ in }
+    var onToggleReblog: (String) -> Void = { _ in }
+    var onToggleBookmark: (String) -> Void = { _ in }
 
     @State private var galleryContext: MediaGalleryContext?
 
@@ -92,29 +95,30 @@ struct StatusCard: View {
 
             HStack(spacing: 20) {
                 actionButton(
-                    count: displayed.repliesCount, systemImage: "bubble.right", isActive: false, tint: .secondary
+                    count: displayed.repliesCount, systemImage: "bubble.right", isActive: false, tint: .secondary,
+                    identifier: "reply-\(displayed.id)"
                 ) { onReply(displayed) }
                 actionButton(
                     count: displayed.reblogsCount,
                     systemImage: displayed.reblogged ? "arrow.2.squarepath.circle.fill" : "arrow.2.squarepath",
-                    isActive: displayed.reblogged, tint: .green
-                ) { onToggleReblog(displayed) }
+                    isActive: displayed.reblogged, tint: .green, identifier: "reblog-\(displayed.id)"
+                ) { onToggleReblog(displayed.id) }
                 actionButton(
                     count: displayed.favouritesCount,
                     systemImage: displayed.favourited ? "star.fill" : "star",
-                    isActive: displayed.favourited, tint: .yellow
-                ) { onToggleFavourite(displayed) }
+                    isActive: displayed.favourited, tint: .yellow, identifier: "favourite-\(displayed.id)"
+                ) { onToggleFavourite(displayed.id) }
                 actionButton(
                     count: nil,
                     systemImage: displayed.bookmarked ? "bookmark.fill" : "bookmark",
-                    isActive: displayed.bookmarked, tint: .blue
-                ) { onToggleBookmark(displayed) }
+                    isActive: displayed.bookmarked, tint: .blue, identifier: "bookmark-\(displayed.id)"
+                ) { onToggleBookmark(displayed.id) }
                 Spacer(minLength: 0)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(12)
+        .padding(10)
         .larpnetCard()
         .fullScreenCover(item: $galleryContext) { context in
             MediaGalleryView(context: context)
@@ -123,10 +127,13 @@ struct StatusCard: View {
 
     /// A real ~44pt-tall tap target (vs. the bare icon+text glyph bounds, which rendered at
     /// only ~13pt) plus a bounce on the SF Symbol when its active state flips -- the "no
-    /// animation or visible reaction" this was missing.
+    /// animation or visible reaction" this was missing. `identifier` is stable across the
+    /// active/inactive icon swap (unlike matching on the SF Symbol name), so UI tests can find
+    /// and tap a specific post's button without depending on its current state.
     @ViewBuilder
     private func actionButton(
-        count: Int?, systemImage: String, isActive: Bool, tint: Color, action: @escaping () -> Void
+        count: Int?, systemImage: String, isActive: Bool, tint: Color, identifier: String,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
@@ -141,5 +148,6 @@ struct StatusCard: View {
         }
         .buttonStyle(.plain)
         .tint(isActive ? tint : .secondary)
+        .accessibilityIdentifier(identifier)
     }
 }
