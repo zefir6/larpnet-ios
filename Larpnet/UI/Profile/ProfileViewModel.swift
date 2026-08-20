@@ -58,15 +58,20 @@ final class ProfileViewModel {
         }
     }
 
+    /// A pending request (locked account, not yet approved) must unfollow to cancel it, not
+    /// follow again -- `following == false` is true in both the "not following" and "requested"
+    /// states, so `requested` has to be checked too, matching Android's `toggleFollow`.
     func toggleFollow() {
-        guard let account, var relationship else { return }
-        let wasFollowing = relationship.following
-        relationship.following.toggle()
-        self.relationship = relationship
+        guard let account else { return }
+        let shouldFollow = relationship?.following != true && relationship?.requested != true
+        var updatedRelationship = relationship ?? Relationship(id: account.id)
+        updatedRelationship.following = shouldFollow && !account.locked
+        updatedRelationship.requested = shouldFollow && account.locked
+        relationship = updatedRelationship
         Task {
             let api = try? appContainer.friendicaAPI()
-            let updated = try? await (wasFollowing ? api?.unfollow(id: account.id) : api?.follow(id: account.id))
-            if let updated { self.relationship = updated }
+            let updated = try? await (shouldFollow ? api?.follow(id: account.id) : api?.unfollow(id: account.id))
+            if let updated { relationship = updated }
         }
     }
 

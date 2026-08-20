@@ -46,10 +46,14 @@ struct ProfileView: View {
                         Button("Edit Profile", action: onEditProfile)
                             .buttonStyle(.bordered)
                     } else if let relationship = viewModel.relationship {
-                        Button(relationship.following ? "Unfollow" : "Follow") {
-                            viewModel.toggleFollow()
+                        let label = relationship.following ? "Unfollow" : (relationship.requested ? "Requested" : "Follow")
+                        if relationship.following || relationship.requested {
+                            Button(label) { viewModel.toggleFollow() }
+                                .buttonStyle(.bordered)
+                        } else {
+                            Button(label) { viewModel.toggleFollow() }
+                                .buttonStyle(.borderedProminent)
                         }
-                        .buttonStyle(.borderedProminent)
                     }
                 }
                 .padding(12)

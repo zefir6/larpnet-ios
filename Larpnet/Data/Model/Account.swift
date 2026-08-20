@@ -83,6 +83,18 @@ struct Relationship: Decodable, Sendable, Hashable {
         case followedBy = "followed_by"
     }
 
+    init(
+        id: String, following: Bool = false, followedBy: Bool = false, blocking: Bool = false,
+        muting: Bool = false, requested: Bool = false
+    ) {
+        self.id = id
+        self.following = following
+        self.followedBy = followedBy
+        self.blocking = blocking
+        self.muting = muting
+        self.requested = requested
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
