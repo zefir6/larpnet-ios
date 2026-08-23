@@ -74,6 +74,13 @@ final class FriendicaAPIClient: Sendable {
         return try await send(path: "api/v1/accounts/relationships", query: query)
     }
 
+    /// Source list for the custom-audience post picker's "People" section.
+    func followers(id: String, maxId: String? = nil) async throws -> Page<Account> {
+        var query: [URLQueryItem] = []
+        if let maxId { query.append(URLQueryItem(name: "max_id", value: maxId)) }
+        return try await sendPaged(path: "api/v1/accounts/\(id)/followers", query: query)
+    }
+
     func updateCredentials(
         displayName: String?, note: String?, locked: Bool?, discoverable: Bool?, bot: Bool?
     ) async throws -> Account {
@@ -159,6 +166,58 @@ final class FriendicaAPIClient: Sendable {
     func deleteStatus(id: String) async throws {
         let request = try buildRequest(path: "api/v1/statuses/\(id)", method: "DELETE")
         _ = try await perform(request)
+    }
+
+    /// `GET /api/v1/lists` also returns non-numeric pseudo-lists (Mastodon "channels") that
+    /// aren't real circles -- see `FriendicaCircle`'s doc comment. Filtered out here so every caller gets
+    /// a clean "can actually post to this" list.
+    func circles() async throws -> [FriendicaCircle] {
+        let all: [FriendicaCircle] = try await send(path: "api/v1/lists")
+        return all.filter { Int($0.id) != nil }
+    }
+
+    /// Posts to a specific audience of individual accounts and/or circles, mixed freely --
+    /// something the standard `POST /api/v1/statuses` `visibility` field can't do (it only takes
+    /// a single circle id, not a combination of circles and individual people). Goes through
+    /// Friendica's legacy Twitter-compatible `POST /api/statuses/update` instead, which accepts
+    /// `contact_allow[]`/`circle_allow[]` directly (confirmed live: both plain account ids and
+    /// circle ids from `circles()` work unmodified, no separate internal-id lookup needed).
+    ///
+    /// Two real capability losses versus `postStatus`, both because this legacy endpoint doesn't
+    /// support them at all -- confirmed against the server source, not assumed:
+    ///  - No `sensitive` flag. `title` (content warning) still works and round-trips to
+    ///    `spoiler_text` correctly.
+    ///  - No media: `media_ids` here means Friendica's internal `photo.id`, not the
+    ///    `api/v1/media`-issued `MediaAttachment.id` this app's upload flow produces -- those are
+    ///    different id spaces, so passing our media ids through would silently attach nothing (or
+    ///    someone else's photo). Callers must not offer media pickers for a custom-audience post.
+    ///
+    /// The endpoint itself returns a legacy Twitter-shaped status object, not a Mastodon one, so
+    /// this only pulls the new post's numeric id out of that response and re-fetches it through
+    /// the normal `getStatus(id:)` to hand callers back a proper `Status`.
+    func postStatusWithACL(
+        status: String, title: String? = nil, inReplyToId: String? = nil,
+        contactIds: [String], circleIds: [String]
+    ) async throws -> Status {
+        var fields = ["status": status]
+        if let title { fields["title"] = title }
+        if let inReplyToId { fields["in_reply_to_status_id"] = inReplyToId }
+        let request = try buildFormRequest(
+            path: "api/statuses/update", fields: fields,
+            arrayFields: [("contact_allow[]", contactIds), ("circle_allow[]", circleIds)]
+        )
+        let (data, _) = try await perform(request)
+        let newId: Int
+        do {
+            newId = try FriendicaJSON.decoder.decode(LegacyStatusIdEnvelope.self, from: data).id
+        } catch {
+            throw NetworkError.parse(underlying: String(describing: error))
+        }
+        return try await getStatus(id: String(newId))
+    }
+
+    private struct LegacyStatusIdEnvelope: Decodable {
+        let id: Int
     }
 
     func favourite(id: String) async throws -> Status {
@@ -312,7 +371,7 @@ final class FriendicaAPIClient: Sendable {
 
     private func buildFormRequest(
         path: String, fields: [String: String], arrayField: (name: String, values: [String])? = nil,
-        method: String = "POST"
+        arrayFields: [(name: String, values: [String])] = [], method: String = "POST"
     ) throws -> URLRequest {
         guard let url = URL(string: path, relativeTo: baseURL) else { throw NetworkError.invalidURL }
         var request = URLRequest(url: url)
@@ -322,8 +381,8 @@ final class FriendicaAPIClient: Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         var pairs = fields.map { key, value in "\(percentEncode(key))=\(percentEncode(value))" }
-        if let arrayField {
-            pairs += arrayField.values.map { "\(percentEncode(arrayField.name))=\(percentEncode($0))" }
+        for field in (arrayField.map { [$0] } ?? []) + arrayFields {
+            pairs += field.values.map { "\(percentEncode(field.name))=\(percentEncode($0))" }
         }
         request.httpBody = pairs.joined(separator: "&").data(using: .utf8)
         return request

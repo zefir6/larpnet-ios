@@ -1,0 +1,22 @@
+[
+    {
+        "id": "160",
+        "title": "Friends",
+        "replies_policy": "list"
+    },
+    {
+        "id": "161",
+        "title": "Groups",
+        "replies_policy": "list"
+    },
+    {
+        "id": "channel:foryou",
+        "title": "Dla Ciebie",
+        "replies_policy": "followed"
+    },
+    {
+        "id": "channel:discover",
+        "title": "Odkryj",
+        "replies_policy": "followed"
+    }
+]

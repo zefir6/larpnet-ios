@@ -6,6 +6,7 @@ import SwiftUI
 struct ComposeView: View {
     @State private var viewModel: ComposeViewModel
     @State private var photoPickerItem: PhotosPickerItem?
+    @State private var showingAudiencePicker = false
     @Environment(\.dismiss) private var dismiss
     let onPosted: () -> Void
 
@@ -32,42 +33,70 @@ struct ComposeView: View {
                     if viewModel.isSpoilerEnabled {
                         TextField("Warning text", text: $viewModel.spoilerText)
                     }
-                    Toggle("Sensitive media", isOn: $viewModel.sensitive)
+                    if !viewModel.isCustomAudience {
+                        Toggle("Sensitive media", isOn: $viewModel.sensitive)
+                    }
                 }
 
-                Section("Visibility") {
-                    Picker("Visibility", selection: $viewModel.visibility) {
-                        ForEach(Self.visibilities, id: \.self) { visibility in
-                            Text(Self.visibilityLabels[visibility] ?? visibility).tag(visibility)
+                if !viewModel.isCustomAudience {
+                    Section("Visibility") {
+                        Picker("Visibility", selection: $viewModel.visibility) {
+                            ForEach(Self.visibilities, id: \.self) { visibility in
+                                Text(Self.visibilityLabels[visibility] ?? visibility).tag(visibility)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                Section {
+                    Toggle("Choose specific people/groups", isOn: $viewModel.isCustomAudience)
+                    if viewModel.isCustomAudience {
+                        Button {
+                            showingAudiencePicker = true
+                        } label: {
+                            HStack {
+                                Text("Audience")
+                                Spacer()
+                                Text(audienceSummary)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
                 }
 
-                Section("Media") {
-                    PhotosPicker("Add photo", selection: $photoPickerItem, matching: .images)
-                    if !viewModel.pendingMedia.isEmpty {
-                        ScrollView(.horizontal) {
-                            HStack {
-                                ForEach(viewModel.pendingMedia) { media in
-                                    ZStack(alignment: .topTrailing) {
-                                        Image(uiImage: media.image)
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(width: 80, height: 80)
-                                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            .overlay {
-                                                if media.isUploading { ProgressView() }
+                if !viewModel.isCustomAudience {
+                    Section("Media") {
+                        PhotosPicker("Add photo", selection: $photoPickerItem, matching: .images)
+                        if !viewModel.pendingMedia.isEmpty {
+                            ScrollView(.horizontal) {
+                                HStack {
+                                    ForEach(viewModel.pendingMedia) { media in
+                                        ZStack(alignment: .topTrailing) {
+                                            Image(uiImage: media.image)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 80, height: 80)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                .overlay {
+                                                    if media.isUploading { ProgressView() }
+                                                }
+                                            Button {
+                                                viewModel.removeMedia(media.id)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
                                             }
-                                        Button {
-                                            viewModel.removeMedia(media.id)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                } else {
+                    Section {
+                        Text("Photos aren't supported on custom-audience posts yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -99,6 +128,17 @@ struct ComposeView: View {
                 if let newValue { viewModel.addMedia(newValue) }
                 photoPickerItem = nil
             }
+            .onChange(of: viewModel.isCustomAudience) { _, isCustomAudience in
+                if isCustomAudience { Task { await viewModel.loadAudienceIfNeeded() } }
+            }
+            .sheet(isPresented: $showingAudiencePicker) {
+                AudiencePickerView(viewModel: viewModel)
+            }
         }
+    }
+
+    private var audienceSummary: String {
+        let count = viewModel.selectedCircleIds.count + viewModel.selectedAccountIds.count
+        return count == 0 ? "None selected" : "\(count) selected"
     }
 }

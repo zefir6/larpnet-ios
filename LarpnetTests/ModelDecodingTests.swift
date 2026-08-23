@@ -104,4 +104,18 @@ final class ModelDecodingTests: XCTestCase {
         let envelope = try FriendicaJSON.decoder.decode(ErrorEnvelope.self, from: data)
         XCTAssertEqual(envelope.error, 1)
     }
+
+    func testDecodesCirclesAndFiltersOutNonNumericChannels() throws {
+        // Verbatim capture of a real `GET /api/v1/lists` response from `larpnet.pl` -- includes
+        // both real circles (numeric id, postable via `visibility=<id>`) and Mastodon "channel"
+        // pseudo-lists (`channel:foryou` etc.), which aren't real circles and must be filtered
+        // out before offering them as a custom-audience option (see `FriendicaCircle`'s doc
+        // comment and `FriendicaAPIClient.circles()`).
+        let data = try loadFixture("lists_live")
+        let all = try FriendicaJSON.decoder.decode([FriendicaCircle].self, from: data)
+        XCTAssertEqual(all.count, 4)
+        let postable = all.filter { Int($0.id) != nil }
+        XCTAssertEqual(postable.map(\.id), ["160", "161"])
+        XCTAssertEqual(postable.map(\.title), ["Friends", "Groups"])
+    }
 }

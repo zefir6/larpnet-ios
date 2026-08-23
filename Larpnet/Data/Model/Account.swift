@@ -105,3 +105,24 @@ struct Relationship: Decodable, Sendable, Hashable {
         requested = c.decode(.requested, default: false)
     }
 }
+
+/// A Friendica "circle" (their term for what Mastodon calls a "list"), used both for custom
+/// timeline filtering (unused here) and, distinctively on Friendica, as an audience for a post's
+/// visibility -- posting with `visibility=<numeric circle id>` restricts a status to that
+/// circle's members. `GET /api/v1/lists` also returns non-numeric pseudo-lists (Mastodon
+/// "channels" like `channel:foryou`) that aren't real circles and can't be posted to -- callers
+/// should filter to numeric ids before offering these as an audience.
+struct FriendicaCircle: Decodable, Sendable, Hashable, Identifiable {
+    var id: String
+    var title: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = c.decode(.title, default: "")
+    }
+}
