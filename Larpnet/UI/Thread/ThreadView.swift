@@ -18,20 +18,36 @@ struct ThreadView: View {
         self.onReply = onReply
     }
 
+    /// A thread opened on a reply deep in a conversation (e.g. from a "mentioned you"
+    /// notification) otherwise lands at the very top of the ancestor chain, leaving the actual
+    /// post of interest below the fold -- looking like it "just opened the main post" instead of
+    /// jumping to the one that was actually tapped. Scrolling to this id once the focus loads
+    /// fixes that; for a thread with no ancestors it's a harmless no-op (already at the top).
+    private static let focusScrollID = "thread-focus"
+
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(viewModel.ancestors) { status in
-                    card(for: status, depth: 0)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(viewModel.ancestors) { status in
+                        card(for: status, depth: 0)
+                    }
+                    if let focus = viewModel.focus {
+                        card(for: focus, depth: 0)
+                            .id(Self.focusScrollID)
+                    }
+                    ForEach(viewModel.descendantRows, id: \.status.id) { row in
+                        card(for: row.status, depth: row.depth)
+                    }
                 }
-                if let focus = viewModel.focus {
-                    card(for: focus, depth: 0)
-                }
-                ForEach(viewModel.descendantRows, id: \.status.id) { row in
-                    card(for: row.status, depth: row.depth)
+                .padding(.top, 8)
+            }
+            .onChange(of: viewModel.focus?.id) { _, newValue in
+                guard newValue != nil else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(Self.focusScrollID, anchor: .top)
                 }
             }
-            .padding(.top, 8)
         }
         .background(LarpnetTheme.pageBackground)
         .overlay {
