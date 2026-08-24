@@ -69,11 +69,19 @@ struct NotificationsView: View {
         return String(HTMLParser.plainText(status.content).prefix(140))
     }
 
+    /// For `favourite`/`reblog`, Friendica's notification API only ever embeds the *thread's*
+    /// status -- for a reaction to a reply (not the thread's own root post), that's someone
+    /// else's post, not the user's (there's no way to ask the API which specific reply was
+    /// reacted to). Saying "favourited your post" would be flatly wrong in that case, so this
+    /// checks whether the embedded status is actually authored by the logged-in user before
+    /// claiming it's theirs.
     private func description(for notification: LarpnetNotification) -> String {
+        let isOwnStatus = notification.status?.account.id != nil
+            && notification.status?.account.id == viewModel.selfAccountId
         switch notification.type {
         case "follow": return "followed you"
-        case "favourite": return "favourited your post"
-        case "reblog": return "boosted your post"
+        case "favourite": return isOwnStatus ? "favourited your post" : "favourited a reply in your thread"
+        case "reblog": return isOwnStatus ? "boosted your post" : "boosted a reply in your thread"
         case "mention": return "mentioned you"
         default: return notification.type
         }

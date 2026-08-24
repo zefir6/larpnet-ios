@@ -13,6 +13,13 @@ final class NotificationsViewModel {
     private let appContainer: AppContainer
     private var nextMaxId: String?
 
+    /// The logged-in user's own account id -- lets the UI tell whether a `favourite`/`reblog`
+    /// notification's embedded `status` is genuinely the user's own post (accurate to say
+    /// "favourited your post") or someone else's (Friendica's Mastodon-API notification for
+    /// "someone liked/reshared your reply" only ever embeds the *thread's* status, which may not
+    /// be authored by the user at all -- see `NotificationsView.description(for:)`).
+    private(set) var selfAccountId: String?
+
     init(appContainer: AppContainer) {
         self.appContainer = appContainer
     }
@@ -22,9 +29,11 @@ final class NotificationsViewModel {
         isLoading = true
         defer { isLoading = false }
         do {
+            async let selfAccountTask = appContainer.friendicaAPI().verifyCredentials()
             let page = try await appContainer.friendicaAPI().notifications()
             notifications = page.items
             nextMaxId = page.nextMaxId
+            selfAccountId = (try? await selfAccountTask)?.id
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
