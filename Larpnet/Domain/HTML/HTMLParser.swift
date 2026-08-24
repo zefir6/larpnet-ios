@@ -49,6 +49,18 @@ enum HTMLParser {
         }
     }
 
+    /// Flat plain-text extraction for previews (notification rows, etc.) that need a single
+    /// line-limited `Text`, not the full block tree -- direct port of Android's
+    /// `Jsoup.parse(status.content).text()`. Deliberately does not reuse `parse(_:)`: a
+    /// multi-paragraph `[HTMLNode]` tree rendered as one `Text` per block breaks `.lineLimit`,
+    /// since it propagates to *every* block independently instead of the post as a whole (this
+    /// is what made notification previews render as choppy per-paragraph truncation instead of
+    /// one clean snippet).
+    static func plainText(_ rawHTML: String) -> String {
+        guard !rawHTML.isEmpty else { return "" }
+        return (try? SwiftSoup.parse(rawHTML).text()) ?? rawHTML
+    }
+
     private static func parseSiblings(_ nodes: [Node]) -> [HTMLNode] {
         var result: [HTMLNode] = []
         var inlineBuffer: [Node] = []

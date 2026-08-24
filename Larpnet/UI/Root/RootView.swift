@@ -71,20 +71,16 @@ struct RootView: View {
             .tabItem { Label("Directory", systemImage: "person.2") }
 
             tabStack(path: $notificationsPath) {
-                NotificationsView(
-                    appContainer: appContainer,
-                    onOpenStatus: { notificationsPath.append(.thread(statusId: $0)) },
-                    onOpenProfile: { notificationsPath.append(.profile(accountId: $0)) }
-                )
-                .navigationTitle("Notifications")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { notificationsPath.append(.messages) } label: {
-                            Image(systemName: "envelope")
+                NotificationsView(appContainer: appContainer)
+                    .navigationTitle("Notifications")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { notificationsPath.append(.messages) } label: {
+                                Image(systemName: "envelope")
+                            }
                         }
                     }
-                }
             }
             .tabItem { Label("Notifications", systemImage: "bell") }
 
