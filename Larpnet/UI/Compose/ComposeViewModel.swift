@@ -3,10 +3,13 @@ import PhotosUI
 import SwiftUI
 
 /// Direct port of Android's `ui/compose/ComposeViewModel.kt`: new post or reply, spoiler
-/// text (content warning), visibility, sensitive flag, media attach/upload. Only
-/// `public`/`unlisted`/`private` are offered -- `direct` visibility posts aren't surfaced back
-/// by the Mastodon API layer on this server (see `Status`'s doc comment), so DMs go through the
-/// separate Conversations/Messages flow instead, matching Android.
+/// text (content warning), visibility, sensitive flag, media attach/upload.
+/// `public`/`unlisted`/`private`/`local` are offered -- `direct` visibility posts aren't
+/// surfaced back by the Mastodon API layer on this server (see `Status`'s doc comment), so DMs
+/// go through the separate Conversations/Messages flow instead, matching Android. `local` is
+/// Friendica-larpnet's own server-only visibility level: a real value the standard
+/// `postStatus` call understands directly (`Item::SERVER_ONLY` server-side, never federated to
+/// other instances), not a compose-only sentinel like the custom-audience feature below.
 ///
 /// The custom-audience feature (`isCustomAudience`/`circles`/`selectedCircleIds`/etc.) has no
 /// Android counterpart -- it's net-new, built on a Friendica-only API `postStatus`'s standard

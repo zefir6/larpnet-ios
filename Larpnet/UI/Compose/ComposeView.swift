@@ -15,9 +15,10 @@ struct ComposeView: View {
         self.onPosted = onPosted
     }
 
-    private static let visibilities = ["public", "unlisted", "private"]
+    private static let visibilities = ["public", "unlisted", "private", "local"]
     private static let visibilityLabels = [
         "public": "Public", "unlisted": "Unlisted", "private": "Followers only",
+        "local": "Larpnet only",
     ]
 
     var body: some View {
@@ -40,12 +41,17 @@ struct ComposeView: View {
 
                 if !viewModel.isCustomAudience {
                     Section("Visibility") {
+                        // `.menu`, not `.segmented` -- four options (adding "Server only"
+                        // alongside the original three) stopped fitting comfortably as segments
+                        // on a phone-width screen, and a dropdown is what Android/the web ACL
+                        // selector both use for this picker anyway.
                         Picker("Visibility", selection: $viewModel.visibility) {
                             ForEach(Self.visibilities, id: \.self) { visibility in
-                                Text(Self.visibilityLabels[visibility] ?? visibility).tag(visibility)
+                                Label(Self.visibilityLabels[visibility] ?? visibility, systemImage: VisibilityIcon.systemName(for: visibility))
+                                    .tag(visibility)
                             }
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
                     }
                 }
 
