@@ -18,6 +18,10 @@ import SwiftUI
 /// (images, the header block) always worked, only the undersized buttons didn't.
 struct StatusCard: View {
     let status: Status
+    /// When true, renders as a condensed row (no card chrome/clip/shadow, tighter padding) for
+    /// use inside a shared outer panel -- `ThreadView`'s single-panel conversation layout. The
+    /// default `false` preserves the normal per-post card look used by Timeline and Profile.
+    var flat: Bool = false
     var onOpenThread: (Status) -> Void = { _ in }
     var onOpenProfile: (String) -> Void = { _ in }
     var onReply: (Status) -> Void = { _ in }
@@ -95,9 +99,13 @@ struct StatusCard: View {
 
             HStack(spacing: 20) {
                 actionButton(
-                    count: displayed.repliesCount, systemImage: "bubble.right", isActive: false, tint: .secondary,
+                    count: nil, systemImage: "arrowshape.turn.up.left", isActive: false, tint: .secondary,
                     identifier: "reply-\(displayed.id)"
                 ) { onReply(displayed) }
+                actionButton(
+                    count: displayed.repliesCount, systemImage: "bubble.right", isActive: false, tint: .secondary,
+                    identifier: "open-thread-\(displayed.id)"
+                ) { onOpenThread(displayed) }
                 actionButton(
                     count: displayed.reblogsCount,
                     systemImage: displayed.reblogged ? "arrow.2.squarepath.circle.fill" : "arrow.2.squarepath",
@@ -118,10 +126,25 @@ struct StatusCard: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(10)
-        .larpnetCard()
+        .modifier(CardChrome(flat: flat))
         .fullScreenCover(item: $galleryContext) { context in
             MediaGalleryView(context: context)
+        }
+    }
+
+    /// `flat` mode drops the card's own background/clip/shadow and outer padding in favor of
+    /// tighter row-only padding, so it reads as one condensed row sharing a parent panel's
+    /// chrome (`ThreadView`'s single outer `.larpnetCard()`) instead of nesting a shadowed card
+    /// inside a card.
+    private struct CardChrome: ViewModifier {
+        let flat: Bool
+
+        func body(content: Content) -> some View {
+            if flat {
+                content.padding(.horizontal, 16).padding(.vertical, 10)
+            } else {
+                content.padding(10).larpnetCard()
+            }
         }
     }
 

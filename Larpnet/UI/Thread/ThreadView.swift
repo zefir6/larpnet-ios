@@ -23,23 +23,38 @@ struct ThreadView: View {
     /// post of interest below the fold -- looking like it "just opened the main post" instead of
     /// jumping to the one that was actually tapped. Scrolling to this id once the focus loads
     /// fixes that; for a thread with no ancestors it's a harmless no-op (already at the top).
+    /// Keyed on `focus?.id`, not on `isLoading` or `focus` itself -- an id doesn't change when a
+    /// favourite/reblog/bookmark toggle replaces the `focus` object with updated counts, so this
+    /// already survives those toggles without re-scrolling, no `isLoading`-keyed workaround
+    /// needed (Android's `LaunchedEffect(state.isLoading)` solves the same problem differently
+    /// because Compose's recomposition semantics differ).
     private static let focusScrollID = "thread-focus"
+
+    /// Indentation stops growing past this depth so a very deep sub-thread doesn't squeeze
+    /// cards down to nothing -- matches Android's `MAX_INDENT_DEPTH`.
+    private static let maxIndentDepth = 6
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.ancestors) { status in
-                        card(for: status, depth: 0)
+                        card(for: status, flat: true, isFocus: false)
+                        divider()
                     }
                     if let focus = viewModel.focus {
-                        card(for: focus, depth: 0)
+                        card(for: focus, flat: true, isFocus: true)
+                            .background(LarpnetTheme.highlight)
                             .id(Self.focusScrollID)
+                        if !viewModel.descendants.isEmpty { divider() }
                     }
-                    ForEach(viewModel.descendantRows, id: \.status.id) { row in
-                        card(for: row.status, depth: row.depth)
+                    ForEach(Array(viewModel.descendants.enumerated()), id: \.element.status.id) { index, item in
+                        descendantRow(item)
+                        if index < viewModel.descendants.count - 1 { divider() }
                     }
                 }
+                .larpnetCard()
+                .padding(.horizontal, 6)
                 .padding(.top, 8)
             }
             .onChange(of: viewModel.focus?.id) { _, newValue in
@@ -60,18 +75,55 @@ struct ThreadView: View {
         .task { await viewModel.load() }
     }
 
+    private func divider() -> some View {
+        Divider().overlay(LarpnetTheme.pageBackground)
+    }
+
     @ViewBuilder
-    private func card(for status: Status, depth: Int) -> some View {
+    private func descendantRow(_ item: ThreadRenderItem) -> some View {
+        HStack(alignment: .top, spacing: 4) {
+            if item.hasChildren {
+                Button {
+                    viewModel.toggleCollapsed(id: item.status.id)
+                } label: {
+                    Image(systemName: item.isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                card(for: item.status, flat: true, isFocus: false)
+                if item.isCollapsed, item.hiddenDescendantCount > 0 {
+                    Button {
+                        viewModel.toggleCollapsed(id: item.status.id)
+                    } label: {
+                        Text("\(item.hiddenDescendantCount) repl\(item.hiddenDescendantCount == 1 ? "y" : "ies")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 16)
+                            .padding(.bottom, 8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.leading, CGFloat(min(item.depth, Self.maxIndentDepth)) * 16)
+    }
+
+    @ViewBuilder
+    private func card(for status: Status, flat: Bool, isFocus: Bool) -> some View {
         StatusCard(
             status: status,
-            onOpenThread: onOpenThread,
+            flat: flat,
+            onOpenThread: isFocus ? { _ in } : onOpenThread,
             onOpenProfile: onOpenProfile,
             onReply: onReply,
             onToggleFavourite: { viewModel.toggleFavourite(id: $0) },
             onToggleReblog: { viewModel.toggleReblog(id: $0) },
             onToggleBookmark: { viewModel.toggleBookmark(id: $0) }
         )
-        .padding(.horizontal, 6)
-        .padding(.leading, CGFloat(depth) * 16)
     }
 }

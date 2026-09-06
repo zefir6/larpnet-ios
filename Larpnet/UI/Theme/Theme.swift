@@ -27,6 +27,12 @@ enum LarpnetTheme {
     static let navBar = Color(hex: 0x833C89)
     static let pageBackground = Color(light: 0xEDEDED, dark: 0x000000)
     static let cardBackground = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
+    /// Tint for the focused post in `ThreadView`'s shared panel, so it visually stands out from
+    /// its ancestors/replies. The dark value is a desaturated, low-luminance take on the light
+    /// wash (`0xF3E1F5`) rather than that same hex reused verbatim -- see this enum's own doc
+    /// comment above for why a flat hex would put dark-mode's adaptive white text on a
+    /// still-light background.
+    static let highlight = Color(light: 0xF3E1F5, dark: 0x2C2030)
 
     enum FontName {
         static let regular = "OpenSans"

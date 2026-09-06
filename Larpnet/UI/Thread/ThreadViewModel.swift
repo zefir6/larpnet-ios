@@ -2,17 +2,20 @@ import Foundation
 
 /// Direct port of Android's `ui/thread/ThreadViewModel.kt`: loads the focus status plus its
 /// context (ancestors from the server, flat; descendants reconstructed into a tree via
-/// `ThreadBuilder`) and flattens everything into `(status, depth)` rows for a simple indented
-/// list. Same optimistic favourite/reblog/bookmark update pattern as `TimelineViewModel`.
+/// `ThreadBuilder`) and flattens the tree into collapse-aware rows. `tree` is kept (not just its
+/// first flattening) as the source of truth for re-flattening on `toggleCollapsed` without a
+/// re-fetch. Same optimistic favourite/reblog/bookmark update pattern as `TimelineViewModel`.
 @MainActor
 @Observable
 final class ThreadViewModel {
     private(set) var ancestors: [Status] = []
     private(set) var focus: Status?
-    private(set) var descendantRows: [ThreadRow] = []
+    private(set) var descendants: [ThreadRenderItem] = []
+    private(set) var collapsedIds: Set<String> = []
     private(set) var isLoading = false
     var errorMessage: String?
 
+    private var tree: ThreadNode?
     private let statusId: String
     private let appContainer: AppContainer
 
@@ -32,12 +35,26 @@ final class ThreadViewModel {
             let context = try await contextTask
             focus = status
             ancestors = context.ancestors.sorted { $0.createdAt < $1.createdAt }
-            let tree = ThreadBuilder.buildTree(focus: status, descendants: context.descendants)
-            descendantRows = Array(ThreadBuilder.flatten(tree).dropFirst())
+            tree = ThreadBuilder.buildTree(focus: status, descendants: context.descendants)
+            collapsedIds = []
+            refreshDescendants()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func toggleCollapsed(id: String) {
+        if collapsedIds.contains(id) { collapsedIds.remove(id) } else { collapsedIds.insert(id) }
+        refreshDescendants()
+    }
+
+    private func refreshDescendants() {
+        guard let tree else {
+            descendants = []
+            return
+        }
+        descendants = ThreadBuilder.flatten(tree, collapsedIds: collapsedIds)
     }
 
     /// Takes an `id`, not a `Status` snapshot -- see `TimelineViewModel`'s toggle methods for
@@ -80,50 +97,52 @@ final class ThreadViewModel {
         }
         if let s = ancestors.first(where: { $0.id == id }) { return s }
         if let s = ancestors.first(where: { $0.reblog?.id == id })?.reblog { return s }
-        if let s = descendantRows.first(where: { $0.status.id == id })?.status { return s }
-        if let s = descendantRows.first(where: { $0.status.reblog?.id == id })?.status.reblog { return s }
+        if let s = descendants.first(where: { $0.status.id == id })?.status { return s }
+        if let s = descendants.first(where: { $0.status.reblog?.id == id })?.status.reblog { return s }
         return nil
     }
 
     /// See `TimelineViewModel.apply` -- `id` is the unwrapped status's id, so a boosted
     /// ancestor/descendant/focus needs matching against both its own id and its wrapped
-    /// `reblog.id`.
+    /// `reblog.id`. Also patches the private `tree` (via `updateTreeStatus`), *before*
+    /// re-deriving `descendants` from it below -- `toggleCollapsed` re-flattens straight from
+    /// `tree`, so if `tree` weren't kept in sync here, collapsing/expanding an unrelated sibling
+    /// branch after a favourite/reblog/bookmark tap would silently revert that tap the next time
+    /// `refreshDescendants()` runs.
     private func apply(id: String, _ mutate: (inout Status) -> Void) {
         if var f = focus {
             if f.id == id {
                 mutate(&f)
                 focus = f
-                return
             } else if var reblog = f.reblog, reblog.id == id {
                 mutate(&reblog)
                 f.reblog = reblog
                 focus = f
-                return
             }
         }
         if let index = ancestors.firstIndex(where: { $0.id == id }) {
             mutate(&ancestors[index])
-            return
-        }
-        if let index = ancestors.firstIndex(where: { $0.reblog?.id == id }) {
+        } else if let index = ancestors.firstIndex(where: { $0.reblog?.id == id }) {
             var reblog = ancestors[index].reblog!
             mutate(&reblog)
             ancestors[index].reblog = reblog
-            return
         }
-        if let index = descendantRows.firstIndex(where: { $0.status.id == id }) {
-            var s = descendantRows[index].status
-            mutate(&s)
-            descendantRows[index] = ThreadRow(status: s, depth: descendantRows[index].depth)
-            return
+        if let tree {
+            self.tree = updateTreeStatus(tree, id: id, mutate: mutate)
         }
-        if let index = descendantRows.firstIndex(where: { $0.status.reblog?.id == id }) {
-            var s = descendantRows[index].status
-            var reblog = s.reblog!
+        refreshDescendants()
+    }
+
+    private func updateTreeStatus(_ node: ThreadNode, id: String, mutate: (inout Status) -> Void) -> ThreadNode {
+        var status = node.status
+        if status.id == id {
+            mutate(&status)
+        } else if var reblog = status.reblog, reblog.id == id {
             mutate(&reblog)
-            s.reblog = reblog
-            descendantRows[index] = ThreadRow(status: s, depth: descendantRows[index].depth)
+            status.reblog = reblog
         }
+        let children = node.children.map { updateTreeStatus($0, id: id, mutate: mutate) }
+        return ThreadNode(status: status, children: children)
     }
 
     private func replace(with status: Status) {
