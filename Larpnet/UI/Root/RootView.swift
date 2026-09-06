@@ -1,9 +1,12 @@
 import SwiftUI
 
 /// SwiftUI idiomatic equivalent of Android's `NavGraph.kt`: a `TabView` with the same 5
-/// bottom-nav tabs in the same order (Home, Local, Directory, Notifications, Settings), each
-/// wrapping its own `NavigationStack` so push navigation stays scoped per tab. Compose is a
-/// `.sheet`, not a pushed route (see `AppRoute.swift`).
+/// bottom-nav tabs as Android (Home, Local, Directory, Notifications, Settings), each wrapping
+/// its own `NavigationStack` so push navigation stays scoped per tab. Compose is a `.sheet`, not
+/// a pushed route (see `AppRoute.swift`). Display order is user-configurable (see
+/// `BottomNavOrderStore`, `SettingsView`'s "Tab order" section) -- each case's `@State` path
+/// binding is fixed to that case, not to a display position, so reordering never scrambles which
+/// tab's navigation stack shows where.
 struct RootView: View {
     let appContainer: AppContainer
     let onLoggedOut: () -> Void
@@ -17,6 +20,25 @@ struct RootView: View {
 
     var body: some View {
         TabView {
+            ForEach(appContainer.bottomNavOrderStore.order) { tab in
+                tabContent(for: tab)
+                    .tabItem { Label(tab.label, systemImage: tab.systemImage) }
+                    .tag(tab)
+            }
+        }
+        .tint(LarpnetTheme.accent)
+        .sheet(item: $composeContext) { context in
+            ComposeView(context: context, appContainer: appContainer, onPosted: {})
+        }
+    }
+
+    /// Each case's content and `@State` path binding stay fixed regardless of where the tab
+    /// sits in `bottomNavOrderStore.order` -- reordering must not scramble which tab's push
+    /// navigation stack shows where.
+    @ViewBuilder
+    private func tabContent(for tab: BottomTab) -> some View {
+        switch tab {
+        case .home:
             tabStack(path: $homePath) {
                 TimelineView(
                     kind: .home, appContainer: appContainer,
@@ -39,8 +61,7 @@ struct RootView: View {
                     }
                 }
             }
-            .tabItem { Label("Home", systemImage: "house") }
-
+        case .local:
             tabStack(path: $localPath) {
                 TimelineView(
                     kind: .local, appContainer: appContainer,
@@ -58,8 +79,7 @@ struct RootView: View {
                     }
                 }
             }
-            .tabItem { Label("Larpnet", systemImage: "person.3") }
-
+        case .directory:
             tabStack(path: $directoryPath) {
                 DirectoryView(
                     appContainer: appContainer,
@@ -68,8 +88,7 @@ struct RootView: View {
                 .navigationTitle("Directory")
                 .navigationBarTitleDisplayMode(.inline)
             }
-            .tabItem { Label("Directory", systemImage: "person.2") }
-
+        case .notifications:
             tabStack(path: $notificationsPath) {
                 NotificationsView(appContainer: appContainer)
                     .navigationTitle("Notifications")
@@ -82,16 +101,10 @@ struct RootView: View {
                         }
                     }
             }
-            .tabItem { Label("Notifications", systemImage: "bell") }
-
+        case .settings:
             tabStack(path: $settingsPath) {
                 SettingsView(appContainer: appContainer, onLoggedOut: onLoggedOut)
             }
-            .tabItem { Label("Settings", systemImage: "gear") }
-        }
-        .tint(LarpnetTheme.accent)
-        .sheet(item: $composeContext) { context in
-            ComposeView(context: context, appContainer: appContainer, onPosted: {})
         }
     }
 

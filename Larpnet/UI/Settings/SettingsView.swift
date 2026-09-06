@@ -50,6 +50,17 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Tab order") {
+                ForEach(appContainer.bottomNavOrderStore.order) { tab in
+                    Label(tab.label, systemImage: tab.systemImage)
+                }
+                .onMove { indices, newOffset in
+                    var order = appContainer.bottomNavOrderStore.order
+                    order.move(fromOffsets: indices, toOffset: newOffset)
+                    appContainer.bottomNavOrderStore.setOrder(order)
+                }
+            }
+
             Section("Privacy") {
                 Toggle("Manually approve followers", isOn: $viewModel.locked)
                 Toggle("Discoverable", isOn: $viewModel.discoverable)
@@ -94,6 +105,9 @@ struct SettingsView: View {
         .background(LarpnetTheme.pageBackground)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { EditButton() }
+        }
         .task { await viewModel.load() }
     }
 }
