@@ -138,6 +138,13 @@ final class TokenStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "recent_tags") }
     }
 
+    /// Comma-joined `BottomTab` raw values, in display order. Not a secret, so `UserDefaults`,
+    /// and deliberately *not* cleared by `clear()` -- a UI preference, not session state.
+    var bottomNavOrder: String? {
+        get { defaults.string(forKey: "bottom_nav_order") }
+        set { defaults.set(newValue, forKey: "bottom_nav_order") }
+    }
+
     /// Clears the access token and cached app registration (client id/secret), but leaves
     /// `pushEnabled` alone -- same split as Android's `clear()`.
     func clear() {
