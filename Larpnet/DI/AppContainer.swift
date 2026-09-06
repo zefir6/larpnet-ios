@@ -11,6 +11,7 @@ import Foundation
 @MainActor
 final class AppContainer: @unchecked Sendable {
     let tokenStore = TokenStore()
+    lazy var recentTagsStore = RecentTagsStore(tokenStore: tokenStore)
 
     /// larpnet.pl sits behind Cloudflare, whose WAF blocks requests carrying a generic
     /// HTTP-library User-Agent with a 403 -- confirmed live (`curl` default UA -> 403,
