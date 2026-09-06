@@ -7,11 +7,16 @@ struct ThreadNode {
     let children: [ThreadNode]
 }
 
-/// One row in a flattened thread view: a status plus how deeply nested its reply is, used for
-/// indentation.
-struct ThreadRow {
+/// One row in a flattened, collapse-aware thread view. `depth` starts at 0 for a direct reply to
+/// the focus post (the root `ThreadNode` passed to `flatten` is never itself emitted as a row --
+/// see `flatten(_:collapsedIds:)`). `hiddenDescendantCount` is the size of the *entire* collapsed
+/// subtree, not just direct children, so a "N replies" hint reflects what re-expanding reveals.
+struct ThreadRenderItem {
     let status: Status
     let depth: Int
+    let hasChildren: Bool
+    let isCollapsed: Bool
+    let hiddenDescendantCount: Int
 }
 
 enum ThreadBuilder {
@@ -54,10 +59,29 @@ enum ThreadBuilder {
         return node(for: focus)
     }
 
-    /// Flattens a `ThreadNode` tree into `(status, depth)` rows for a simple indented list,
-    /// depth-first.
-    static func flatten(_ node: ThreadNode, depth: Int = 0) -> [ThreadRow] {
-        [ThreadRow(status: node.status, depth: depth)]
-            + node.children.flatMap { flatten($0, depth: depth + 1) }
+    /// Flattens `root`'s children (never `root` itself -- the caller already renders the focus
+    /// post separately) into a collapse-aware, depth-first row list. A node whose id is in
+    /// `collapsedIds` emits only itself, with `hiddenDescendantCount` covering its whole
+    /// subtree; an expanded node emits itself followed by its flattened children one level
+    /// deeper. Direct replies to `root` land at depth 0.
+    static func flatten(_ root: ThreadNode, collapsedIds: Set<String>) -> [ThreadRenderItem] {
+        root.children.flatMap { flattenNode($0, depth: 0, collapsedIds: collapsedIds) }
+    }
+
+    private static func flattenNode(_ node: ThreadNode, depth: Int, collapsedIds: Set<String>) -> [ThreadRenderItem] {
+        let isCollapsed = collapsedIds.contains(node.status.id)
+        let item = ThreadRenderItem(
+            status: node.status,
+            depth: depth,
+            hasChildren: !node.children.isEmpty,
+            isCollapsed: isCollapsed,
+            hiddenDescendantCount: isCollapsed ? countDescendants(node) : 0
+        )
+        guard !isCollapsed else { return [item] }
+        return [item] + node.children.flatMap { flattenNode($0, depth: depth + 1, collapsedIds: collapsedIds) }
+    }
+
+    private static func countDescendants(_ node: ThreadNode) -> Int {
+        node.children.count + node.children.reduce(0) { $0 + countDescendants($1) }
     }
 }
