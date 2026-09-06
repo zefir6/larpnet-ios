@@ -31,6 +31,10 @@ final class ComposeViewModel {
     /// `selectedCircleIds` + `selectedAccountIds` instead (see `publish()`).
     var isCustomAudience = false
     private(set) var circles: [FriendicaCircle] = []
+    static let predefinedTags = ["larp", "random"]
+    var selectedTags: Set<String> = []
+    private(set) var customTags: [String] = []
+    var customTagInput: String = ""
     private(set) var followers: [Account] = []
     private(set) var isLoadingAudience = false
     var selectedCircleIds: Set<String> = []
@@ -110,6 +114,60 @@ final class ComposeViewModel {
         if selectedAccountIds.contains(id) { selectedAccountIds.remove(id) } else { selectedAccountIds.insert(id) }
     }
 
+    /// Predefined + this session's recent tags (from `AppContainer.recentTagsStore`), deduped
+    /// case-insensitively, predefined ones first -- same priority as Android's `TagsSection.kt`.
+    var toggleableTags: [String] {
+        let recent = appContainer.recentTagsStore.recentTags.filter { recent in
+            !Self.predefinedTags.contains { $0.caseInsensitiveCompare(recent) == .orderedSame }
+        }
+        return Self.predefinedTags + recent
+    }
+
+    func toggleTag(_ tag: String) {
+        if selectedTags.contains(tag) { selectedTags.remove(tag) } else { selectedTags.insert(tag) }
+    }
+
+    /// Normalizes free-typed input (trim, strip one leading `#`, lowercase, reject anything
+    /// still containing whitespace after that) and either toggles an existing predefined/recent
+    /// chip if it matches, or adds a new custom chip -- mirrors Android's `addCustomTag()`.
+    func addCustomTag() {
+        var normalized = customTagInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("#") { normalized.removeFirst() }
+        normalized = normalized.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        customTagInput = ""
+        guard !normalized.isEmpty, !normalized.contains(where: \.isWhitespace) else { return }
+
+        if let existing = toggleableTags.first(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            selectedTags.insert(existing)
+            return
+        }
+        if let existing = customTags.first(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            selectedTags.insert(existing)
+            return
+        }
+        customTags.append(normalized)
+        selectedTags.insert(normalized)
+    }
+
+    func removeCustomTag(_ tag: String) {
+        customTags.removeAll { $0 == tag }
+        selectedTags.remove(tag)
+    }
+
+    private var tagsToPublish: [String] {
+        (toggleableTags + customTags).filter { selectedTags.contains($0) }
+    }
+
+    /// Folds selected tags into the outgoing body as `#tag` tokens -- there's no dedicated tags
+    /// API field, the server derives hashtags from the post text itself (see Android's
+    /// `ComposeViewModel.buildStatusText`).
+    private var textToPublish: String {
+        let tags = tagsToPublish
+        guard !tags.isEmpty else { return text }
+        let tagLine = tags.map { "#\($0)" }.joined(separator: " ")
+        return text.isEmpty ? tagLine : "\(text)\n\n\(tagLine)"
+    }
+
     func addMedia(_ item: PhotosPickerItem) {
         Task {
             guard let data = try? await item.loadTransferable(type: Data.self),
@@ -146,9 +204,10 @@ final class ComposeViewModel {
         defer { isPublishing = false }
         do {
             let api = try appContainer.friendicaAPI()
+            let body = textToPublish
             if isCustomAudience {
                 _ = try await api.postStatusWithACL(
-                    status: text,
+                    status: body,
                     title: isSpoilerEnabled ? spoilerText : nil,
                     inReplyToId: replyToId,
                     contactIds: Array(selectedAccountIds),
@@ -156,7 +215,7 @@ final class ComposeViewModel {
                 )
             } else {
                 _ = try await api.postStatus(
-                    status: text,
+                    status: body,
                     inReplyToId: replyToId,
                     visibility: visibility,
                     spoilerText: isSpoilerEnabled ? spoilerText : nil,
@@ -164,6 +223,7 @@ final class ComposeViewModel {
                     mediaIds: pendingMedia.compactMap(\.uploadedId)
                 )
             }
+            for tag in tagsToPublish { appContainer.recentTagsStore.recordUsed(tag) }
             return true
         } catch {
             errorMessage = String(describing: error)

@@ -129,6 +129,15 @@ final class TokenStore: @unchecked Sendable {
         accessToken != nil && instanceBaseURL != nil
     }
 
+    /// Comma-joined, most-recent-first, capped at 3 by `RecentTagsStore` before it ever writes
+    /// here. Not a secret, so `UserDefaults`, and deliberately *not* cleared by `clear()` --
+    /// same rationale as `preferredInstance`: it's a convenience for whoever logs in next, not
+    /// session state.
+    var recentTags: String? {
+        get { defaults.string(forKey: "recent_tags") }
+        set { defaults.set(newValue, forKey: "recent_tags") }
+    }
+
     /// Clears the access token and cached app registration (client id/secret), but leaves
     /// `pushEnabled` alone -- same split as Android's `clear()`.
     func clear() {

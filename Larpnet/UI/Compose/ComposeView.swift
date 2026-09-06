@@ -39,6 +39,10 @@ struct ComposeView: View {
                     }
                 }
 
+                Section("Tags") {
+                    TagsSectionView(viewModel: viewModel)
+                }
+
                 if !viewModel.isCustomAudience {
                     Section("Visibility") {
                         // `.menu`, not `.segmented` -- four options (adding "Server only"
