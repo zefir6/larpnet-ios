@@ -3,7 +3,8 @@ import SwiftUI
 /// Direct port of Android's `ui/settings/SettingsScreen.kt`: profile summary, privacy switches
 /// (locked/discoverable/bot), push toggle (drives `BackgroundRefresh` instead of Android's
 /// `NtfyListenerService` -- see that file's doc comment), "open web settings" fallback for
-/// anything with no API route, logout.
+/// anything with no API route, an abuse-reporting/child-safety-standards "Safety" section, and
+/// logout.
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     let onLoggedOut: () -> Void
@@ -85,6 +86,11 @@ struct SettingsView: View {
                 Section {
                     Link("Open web settings", destination: webSettingsURL)
                 }
+            }
+
+            Section("Safety") {
+                Link("Report abuse", destination: viewModel.reportAbuseURL)
+                Link("Child safety standards", destination: viewModel.childSafetyStandardsURL)
             }
 
             if let errorMessage = viewModel.errorMessage {
