@@ -9,7 +9,13 @@ brew install xcodegen
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 xcodegen generate
 
-# The generated project has no Package.resolved yet, but Xcode Cloud requires
-# one to exist before the build/archive action (it doesn't resolve packages
-# live during that step). Resolve now so the file is in place beforehand.
-xcodebuild -resolvePackageDependencies -project Larpnet.xcodeproj -scheme Larpnet
+# Xcode Cloud's build environment disables automatic package resolution --
+# even `xcodebuild -resolvePackageDependencies` run from here fails with
+# "a resolved file is required when automatic dependency resolution is
+# disabled". So instead of resolving, copy in the pinned Package.resolved
+# committed at the repo root. Regenerate that file locally after changing
+# dependencies with:
+#   xcodebuild -resolvePackageDependencies -project Larpnet.xcodeproj -scheme Larpnet
+#   cp Larpnet.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved Package.resolved
+mkdir -p Larpnet.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+cp Package.resolved Larpnet.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
