@@ -49,6 +49,12 @@ struct StatusCard: View {
 
     private var displayed: Status { status.reblog ?? status }
     private var isOwnPost: Bool { currentAccountId != nil && currentAccountId == displayed.account.id }
+    /// Whether there's anything for the "..." button / long-press menu to show at all -- used to
+    /// hide the button entirely rather than offer a dead-end tap target when neither applies
+    /// (e.g. `LocalPostListView`'s read-only rows, which attach no `.postModerationHost`).
+    private var hasMenuContent: Bool {
+        isOwnPost ? onDelete != nil : moderationActions != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -154,6 +160,23 @@ struct StatusCard: View {
                     isActive: displayed.bookmarked, tint: .blue, identifier: "bookmark-\(displayed.id)"
                 ) { onToggleBookmark(displayed.id) }
                 Spacer(minLength: 0)
+                // An explicit, always-visible tap target for moderation, not just a long-press
+                // context menu -- long press discoverability is poor (nothing on the card hints
+                // it's there), so this "..." button in the row's trailing/bottom-right corner is
+                // the primary way in; the `.contextMenu` below stays as a secondary shortcut for
+                // anyone used to that gesture, sharing the exact same menu content.
+                if hasMenuContent {
+                    Menu {
+                        moderationMenuItems
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .tint(.secondary)
+                    .accessibilityIdentifier("more-\(displayed.id)")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -162,23 +185,30 @@ struct StatusCard: View {
         .fullScreenCover(item: $galleryContext) { context in
             MediaGalleryView(context: context)
         }
-        // Gated on both `moderationActions` being present (screens like the Hidden/Blocked
-        // Posts and Following lists render `StatusCard` with no `.postModerationHost`
-        // attached, so there's nothing to hide/block/report from there) and `!isOwnPost` --
-        // never offer "Block yourself"/"Report yourself".
         .contextMenu {
-            if isOwnPost {
-                if let onDelete {
-                    Button("Delete", role: .destructive) { onDelete(displayed) }
-                }
-            } else if let actions = moderationActions {
-                Button("Hide post") { actions.hide(displayed.id) }
-                Button("Block post", role: .destructive) { actions.requestBlockPost(displayed.id, displayed.account.id) }
-                Divider()
-                Button("Block @\(displayed.account.acct)", role: .destructive) { actions.blockAccount(displayed.account.id) }
-                Button("Report post\u{2026}") { actions.requestReportPost(displayed.id, displayed.account.id, displayed.account.acct) }
-                Button("Report @\(displayed.account.acct)\u{2026}") { actions.requestReportAccount(displayed.account.id, displayed.account.acct) }
+            moderationMenuItems
+        }
+    }
+
+    /// Delete (own posts) or hide/block/report (everyone else's) -- shared between the
+    /// always-visible "..." button and the long-press `.contextMenu`, so both trigger the exact
+    /// same actions. Gated on both `moderationActions` being present (screens like the
+    /// Hidden/Blocked Posts and Following lists render `StatusCard` with no
+    /// `.postModerationHost` attached, so there's nothing to hide/block/report from there) and
+    /// `!isOwnPost` -- never offer "Block yourself"/"Report yourself".
+    @ViewBuilder
+    private var moderationMenuItems: some View {
+        if isOwnPost {
+            if let onDelete {
+                Button("Delete", role: .destructive) { onDelete(displayed) }
             }
+        } else if let actions = moderationActions {
+            Button("Hide post") { actions.hide(displayed.id) }
+            Button("Block post", role: .destructive) { actions.requestBlockPost(displayed.id, displayed.account.id) }
+            Divider()
+            Button("Block @\(displayed.account.acct)", role: .destructive) { actions.blockAccount(displayed.account.id) }
+            Button("Report post\u{2026}") { actions.requestReportPost(displayed.id, displayed.account.id, displayed.account.acct) }
+            Button("Report @\(displayed.account.acct)\u{2026}") { actions.requestReportAccount(displayed.account.id, displayed.account.acct) }
         }
     }
 
