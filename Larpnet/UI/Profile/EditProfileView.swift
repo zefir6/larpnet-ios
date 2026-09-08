@@ -76,7 +76,7 @@ struct EditProfileView: View {
                         }
                     }
                 }
-                .disabled(viewModel.isSaving)
+                .disabled(viewModel.isSaving || viewModel.isUploadingAvatar)
             }
         }
         .overlay {
