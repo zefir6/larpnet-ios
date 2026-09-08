@@ -51,14 +51,43 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Tab order") {
-                ForEach(appContainer.bottomNavOrderStore.order) { tab in
-                    Label(tab.label, systemImage: tab.systemImage)
+            Section {
+                ForEach(appContainer.navigationLayoutStore.bottomBar) { destination in
+                    Label(destination.label, systemImage: destination.systemImage)
+                        .swipeActions(edge: .trailing) {
+                            if appContainer.navigationLayoutStore.bottomBar.count > NavigationLayoutStore.minimumBottomBarCount {
+                                Button("Move to Menu") {
+                                    appContainer.navigationLayoutStore.moveToMenu(destination)
+                                }
+                                .tint(.blue)
+                            }
+                        }
                 }
                 .onMove { indices, newOffset in
-                    var order = appContainer.bottomNavOrderStore.order
+                    var order = appContainer.navigationLayoutStore.bottomBar
                     order.move(fromOffsets: indices, toOffset: newOffset)
-                    appContainer.bottomNavOrderStore.setOrder(order)
+                    appContainer.navigationLayoutStore.setBottomBar(order)
+                }
+            } header: {
+                Text("Bottom bar")
+            } footer: {
+                Text("At least \(NavigationLayoutStore.minimumBottomBarCount) must stay in the bottom bar.")
+            }
+
+            Section("Top-left menu") {
+                ForEach(appContainer.navigationLayoutStore.menu) { destination in
+                    Label(destination.label, systemImage: destination.systemImage)
+                        .swipeActions(edge: .trailing) {
+                            Button("Move to Bottom Bar") {
+                                appContainer.navigationLayoutStore.moveToBottomBar(destination)
+                            }
+                            .tint(.blue)
+                        }
+                }
+                .onMove { indices, newOffset in
+                    var order = appContainer.navigationLayoutStore.menu
+                    order.move(fromOffsets: indices, toOffset: newOffset)
+                    appContainer.navigationLayoutStore.setMenu(order)
                 }
             }
 

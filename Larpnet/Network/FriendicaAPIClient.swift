@@ -81,8 +81,16 @@ final class FriendicaAPIClient: Sendable {
         return try await sendPaged(path: "api/v1/accounts/\(id)/followers", query: query)
     }
 
+    /// `avatar`, when non-nil, is sent as a multipart file part (field name `avatar`) alongside
+    /// the text fields -- confirmed against Friendica's own `UpdateCredentials.php`: it reads
+    /// `avatar` from `$_FILES`, same as every other Mastodon-API client's profile-picture flow.
+    /// The whole request is always multipart/form-data (not conditionally switched between that
+    /// and form-urlencoded depending on whether an avatar is present) -- multipart is a strict
+    /// superset for plain text fields too, and this is what real Mastodon-API clients always use
+    /// for this specific endpoint.
     func updateCredentials(
-        displayName: String?, note: String?, locked: Bool?, discoverable: Bool?, bot: Bool?
+        displayName: String? = nil, note: String? = nil, locked: Bool? = nil, discoverable: Bool? = nil,
+        bot: Bool? = nil, avatar: (data: Data, mimeType: String, filename: String)? = nil
     ) async throws -> Account {
         var fields: [String: String] = [:]
         if let displayName { fields["display_name"] = displayName }
@@ -90,7 +98,13 @@ final class FriendicaAPIClient: Sendable {
         if let locked { fields["locked"] = locked ? "true" : "false" }
         if let discoverable { fields["discoverable"] = discoverable ? "true" : "false" }
         if let bot { fields["bot"] = bot ? "true" : "false" }
-        let request = try buildFormRequest(path: "api/v1/accounts/update_credentials", fields: fields, method: "PATCH")
+        var files: [MultipartFile] = []
+        if let avatar {
+            files.append(MultipartFile(fieldName: "avatar", filename: avatar.filename, mimeType: avatar.mimeType, data: avatar.data))
+        }
+        let request = try buildMultipartRequest(
+            path: "api/v1/accounts/update_credentials", method: "PATCH", fields: fields, files: files
+        )
         let (data, _) = try await perform(request)
         do {
             return try FriendicaJSON.decoder.decode(Account.self, from: data)
@@ -125,6 +139,62 @@ final class FriendicaAPIClient: Sendable {
         let request = try buildFormRequest(
             path: "api/v1/reports", fields: fields, arrayField: ("status_ids[]", statusIds)
         )
+        _ = try await perform(request)
+    }
+
+    // MARK: - Photo albums (Friendica-native, not Mastodon-compatible)
+    //
+    // No Mastodon-API equivalent -- photo albums are a Friendica-only feature, reachable under
+    // `api/friendica/photo*`/`api/friendica/photoalbum*` (confirmed against Friendica's own
+    // `static/routes.config.php` and `src/Module/Api/Friendica/Photo*` source, not just the
+    // wiki docs, which mismatch the source on a couple of paths). Response shapes verified the
+    // same way: `src/Factory/Api/Friendica/Photo.php` for the single/list photo field names,
+    // `Module/Api/Friendica/Photoalbum/Index.php` for the album-list shape.
+
+    /// `GET api/friendica/photoalbums` -- every album name this account has, with a photo count.
+    /// Album *creation* has no dedicated endpoint: uploading the first photo with a new album
+    /// name implicitly creates it (see `uploadPhoto`).
+    ///
+    /// Response is a **bare JSON array**, not `{"albums": [...]}` -- confirmed live (a
+    /// `DecodingError.typeMismatch` against an enveloped-object decode target, "expected
+    /// Dictionary but found an array"). The PHP source builds `['albums' => $items]` before
+    /// handing it to `addFormattedContent`, which reads like it should produce an object, but
+    /// that wrapper key is apparently only used to name the root element for XML output --
+    /// the JSON formatter strips it and serializes the array bare. `photos(inAlbum:)` below
+    /// shares the exact same `addFormattedContent` call shape (`['photo' => [...]]`), so it
+    /// almost certainly has the identical bare-array shape even though only the albums endpoint
+    /// has been confirmed live so far.
+    func photoAlbums() async throws -> [FriendicaPhotoAlbum] {
+        let array: LossyArray<FriendicaPhotoAlbum> = try await send(path: "api/friendica/photoalbums")
+        return array.elements
+    }
+
+    /// `GET api/friendica/photoalbum?album=<name>` -- every photo in one album. See
+    /// `photoAlbums()`'s doc comment for why this decodes a bare array, not `{"photo": [...]}`.
+    func photos(inAlbum album: String) async throws -> [FriendicaPhoto] {
+        let array: LossyArray<FriendicaPhoto> = try await send(
+            path: "api/friendica/photoalbum", query: [URLQueryItem(name: "album", value: album)]
+        )
+        return array.elements
+    }
+
+    /// `POST api/friendica/photo/create` -- `media` as a multipart file part (confirmed against
+    /// `Photo/Create.php`: it reads `$_FILES['media']`, not a base64 text field, despite what the
+    /// wiki docs say). Doesn't parse the response body: `photo/create`'s single-photo response
+    /// shape (`link`/`scales`, not the `thumb` field `photos(inAlbum:)`/`photoAlbums()` use) isn't
+    /// worth a second model just to skip a re-fetch -- callers should reload the album's photo
+    /// list afterward instead, same as `LocalPostListView`'s reload-after-mutation pattern.
+    func uploadPhoto(data: Data, mimeType: String, filename: String, album: String, description: String? = nil) async throws {
+        var fields = ["album": album]
+        if let description { fields["desc"] = description }
+        let files = [MultipartFile(fieldName: "media", filename: filename, mimeType: mimeType, data: data)]
+        let request = try buildMultipartRequest(path: "api/friendica/photo/create", fields: fields, files: files)
+        _ = try await perform(request)
+    }
+
+    /// `POST api/friendica/photo/delete`.
+    func deletePhoto(id: String) async throws {
+        let request = try buildFormRequest(path: "api/friendica/photo/delete", fields: ["photo_id": id])
         _ = try await perform(request)
     }
 
@@ -348,32 +418,10 @@ final class FriendicaAPIClient: Sendable {
     // MARK: - Media
 
     func uploadMedia(data: Data, mimeType: String, filename: String, description: String? = nil) async throws -> MediaAttachment {
-        guard let url = URL(string: "api/v1/media", relativeTo: baseURL) else { throw NetworkError.invalidURL }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        guard let token = tokenStore.accessToken else { throw NetworkError.notLoggedIn }
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let boundary = "larpnet-ios-\(UUID().uuidString)"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-
-        var body = Data()
-        func appendField(name: String, value: String) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(value)\r\n".data(using: .utf8)!)
-        }
-        if let description { appendField(name: "description", value: description) }
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append(
-            "Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n"
-                .data(using: .utf8)!
-        )
-        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
-        body.append(data)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        request.httpBody = body
-
+        var fields: [String: String] = [:]
+        if let description { fields["description"] = description }
+        let files = [MultipartFile(fieldName: "file", filename: filename, mimeType: mimeType, data: data)]
+        let request = try buildMultipartRequest(path: "api/v1/media", fields: fields, files: files)
         let (responseData, _) = try await perform(request)
         do {
             return try FriendicaJSON.decoder.decode(MediaAttachment.self, from: responseData)
@@ -383,6 +431,50 @@ final class FriendicaAPIClient: Sendable {
     }
 
     // MARK: - Request plumbing
+
+    private struct MultipartFile {
+        let fieldName: String
+        let filename: String
+        let mimeType: String
+        let data: Data
+    }
+
+    /// Shared multipart/form-data body builder -- originally `uploadMedia`'s own inline
+    /// implementation, generalized to also carry `updateCredentials`'s avatar and
+    /// `uploadPhoto`'s image, since all three need the same boundary/`Content-Disposition`
+    /// machinery, just with a different mix of text fields and file parts.
+    private func buildMultipartRequest(
+        path: String, method: String = "POST", fields: [String: String] = [:], files: [MultipartFile] = []
+    ) throws -> URLRequest {
+        guard let url = URL(string: path, relativeTo: baseURL) else { throw NetworkError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        guard let token = tokenStore.accessToken else { throw NetworkError.notLoggedIn }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let boundary = "larpnet-ios-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        for (name, value) in fields {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        for file in files {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append(
+                "Content-Disposition: form-data; name=\"\(file.fieldName)\"; filename=\"\(file.filename)\"\r\n"
+                    .data(using: .utf8)!
+            )
+            body.append("Content-Type: \(file.mimeType)\r\n\r\n".data(using: .utf8)!)
+            body.append(file.data)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+        return request
+    }
 
     private func pagingQuery(maxId: String?, sinceId: String?, limit: Int) -> [URLQueryItem] {
         var items = [URLQueryItem(name: "limit", value: String(limit))]

@@ -23,9 +23,14 @@ struct BlockedAccountsView: View {
                     }
                 }
             }
-            if viewModel.accounts.isEmpty, !viewModel.isLoading {
+            if viewModel.accounts.isEmpty, !viewModel.isLoading, viewModel.errorMessage == nil {
                 Text("No blocked users.")
                     .foregroundStyle(.secondary)
+            }
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
         .listStyle(.insetGrouped)

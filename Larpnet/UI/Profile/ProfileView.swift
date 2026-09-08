@@ -2,12 +2,21 @@ import SwiftUI
 
 struct ProfileView: View {
     @State private var viewModel: ProfileViewModel
+    // `RemoteImage` only re-fetches when its fetch id (url + `refreshToken`) actually changes --
+    // `EditProfileViewModel.uploadAvatar` seeds `ImageLoader`'s cache with the freshly uploaded
+    // bytes directly, but if the server happens to return the *same* literal avatar URL string
+    // as before (unconfirmed either way), the URL alone wouldn't tell this screen's `RemoteImage`
+    // instance to look again. Bumping this on every reappear-triggered reload below forces it to,
+    // and since the cache is already correctly seeded by then, that's a guaranteed hit, not a
+    // network round-trip.
+    @State private var avatarRefreshToken = 0
     let appContainer: AppContainer
     let onOpenThread: (Status) -> Void
     let onOpenProfile: (String) -> Void
     let onReply: (Status) -> Void
     let onEditProfile: () -> Void
     let onOpenHashtag: (String) -> Void
+    let onOpenAlbums: () -> Void
 
     init(
         accountId: String?, appContainer: AppContainer,
@@ -15,7 +24,8 @@ struct ProfileView: View {
         onOpenProfile: @escaping (String) -> Void,
         onReply: @escaping (Status) -> Void,
         onEditProfile: @escaping () -> Void,
-        onOpenHashtag: @escaping (String) -> Void = { _ in }
+        onOpenHashtag: @escaping (String) -> Void = { _ in },
+        onOpenAlbums: @escaping () -> Void = {}
     ) {
         _viewModel = State(initialValue: ProfileViewModel(accountId: accountId, appContainer: appContainer))
         self.appContainer = appContainer
@@ -24,13 +34,14 @@ struct ProfileView: View {
         self.onReply = onReply
         self.onEditProfile = onEditProfile
         self.onOpenHashtag = onOpenHashtag
+        self.onOpenAlbums = onOpenAlbums
     }
 
     var body: some View {
         ScrollView {
             if let account = viewModel.account {
                 VStack(alignment: .leading, spacing: 8) {
-                    RemoteImage(url: URL(string: account.avatar))
+                    RemoteImage(url: URL(string: account.avatar), refreshToken: viewModel.isOwnProfile ? avatarRefreshToken : 0)
                         .frame(width: 72, height: 72)
                         .clipShape(Circle())
                     Text(account.displayName.isEmpty ? account.username : account.displayName)
@@ -48,8 +59,12 @@ struct ProfileView: View {
                     .foregroundStyle(.secondary)
 
                     if viewModel.isOwnProfile {
-                        Button("Edit Profile", action: onEditProfile)
-                            .buttonStyle(.bordered)
+                        HStack {
+                            Button("Edit Profile", action: onEditProfile)
+                                .buttonStyle(.bordered)
+                            Button("Albums", action: onOpenAlbums)
+                                .buttonStyle(.bordered)
+                        }
                     } else if let relationship = viewModel.relationship {
                         let label = relationship.following ? "Unfollow" : (relationship.requested ? "Requested" : "Follow")
                         if relationship.following || relationship.requested {
@@ -99,6 +114,18 @@ struct ProfileView: View {
         .navigationTitle(viewModel.account?.displayName ?? "Profile")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
+        // `.task` only runs once, the first time this view is inserted -- it does not re-run
+        // when the view merely reappears after a pushed child (e.g. Edit Profile) pops. Without
+        // this, an avatar/display-name/bio change made on Edit Profile never becomes visible
+        // here, since this screen's `viewModel` instance stays alive the whole time and is never
+        // reloaded. `viewModel.account != nil` doubles as "already loaded once" so this doesn't
+        // fire redundantly alongside `.task` on first appearance (account is still nil then).
+        .onAppear {
+            if viewModel.account != nil {
+                avatarRefreshToken += 1
+                Task { await viewModel.load() }
+            }
+        }
         .postModerationHost(
             onHidePost: { id in
                 appContainer.hiddenPostsStore.add(id)

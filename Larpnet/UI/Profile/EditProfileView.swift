@@ -1,7 +1,9 @@
+import PhotosUI
 import SwiftUI
 
 struct EditProfileView: View {
     @State private var viewModel: EditProfileViewModel
+    @State private var avatarPickerItem: PhotosPickerItem?
     @Environment(\.dismiss) private var dismiss
     let onSaved: () -> Void
 
@@ -12,6 +14,39 @@ struct EditProfileView: View {
 
     var body: some View {
         Form {
+            Section {
+                HStack {
+                    Spacer(minLength: 0)
+                    PhotosPicker(selection: $avatarPickerItem, matching: .images) {
+                        ZStack {
+                            RemoteImage(url: URL(string: viewModel.avatarURL), refreshToken: viewModel.avatarVersion)
+                                .frame(width: 88, height: 88)
+                                .clipShape(Circle())
+                            if viewModel.isUploadingAvatar {
+                                Circle().fill(.black.opacity(0.4)).frame(width: 88, height: 88)
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: "camera.fill")
+                                    .font(.caption)
+                                    .padding(6)
+                                    .background(.black.opacity(0.6), in: Circle())
+                                    .foregroundStyle(.white)
+                                    .offset(x: 32, y: 32)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isUploadingAvatar)
+                    Spacer(minLength: 0)
+                }
+                .listRowBackground(Color.clear)
+            }
+            .onChange(of: avatarPickerItem) { _, newValue in
+                guard let newValue else { return }
+                viewModel.stageAvatarForCropping(newValue)
+                avatarPickerItem = nil
+            }
+
             Section("Display name") {
                 TextField("Display name", text: $viewModel.displayName)
             }
@@ -48,5 +83,19 @@ struct EditProfileView: View {
             if viewModel.isLoading { ProgressView() }
         }
         .task { await viewModel.load() }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.imageToCrop != nil },
+                set: { if !$0 { viewModel.cancelCropping() } }
+            )
+        ) {
+            if let imageToCrop = viewModel.imageToCrop {
+                AvatarCropView(
+                    image: imageToCrop,
+                    onCancel: { viewModel.cancelCropping() },
+                    onCrop: { viewModel.uploadAvatar($0) }
+                )
+            }
+        }
     }
 }
