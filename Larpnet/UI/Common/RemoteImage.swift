@@ -12,17 +12,34 @@ import UIKit
 /// plain `static let` serve as `EnvironmentKey.defaultValue`.
 final class ImageLoader: @unchecked Sendable {
     private let session: URLSession
+    private let tokenStore: TokenStore?
     private let cache = NSCache<NSURL, UIImage>()
 
-    init(session: URLSession) {
+    /// `tokenStore` is optional only for the environment-default fallback used when a view is
+    /// previewed/used without the real app environment wired up -- every real call site
+    /// (`AppContainer.imageLoader`) passes one.
+    init(session: URLSession, tokenStore: TokenStore? = nil) {
         self.session = session
+        self.tokenStore = tokenStore
     }
 
+    /// Every other authenticated call in this app (`FriendicaAPIClient.buildRequest`) attaches
+    /// the OAuth Bearer token -- this one didn't, which worked fine for public avatars/media
+    /// (Friendica serves those unauthenticated, same as any federated client would need) but
+    /// silently failed for ACL-restricted photos (private posts' attachments, non-public photo
+    /// albums): the request came back 401/403, `UIImage(data:)` never got real image bytes, and
+    /// `load(_:)` just returned nil -- indistinguishable from "still loading" in `RemoteImage`,
+    /// which is exactly the "private pictures just don't display" symptom this fixes. Attaching
+    /// the token to every request is harmless for public resources, which ignore it.
     func load(_ url: URL) async -> UIImage? {
         if let cached = cache.object(forKey: url as NSURL) {
             return cached
         }
-        guard let (data, response) = try? await session.data(from: url),
+        var request = URLRequest(url: url)
+        if let token = tokenStore?.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let image = UIImage(data: data) else {
             return nil

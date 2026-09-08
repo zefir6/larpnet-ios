@@ -43,7 +43,7 @@ final class AppContainer: @unchecked Sendable {
     /// just the User-Agent) covers both.
     let apiSession = makeSession()
     let imageSession = makeSession()
-    lazy var imageLoader = ImageLoader(session: imageSession)
+    lazy var imageLoader = ImageLoader(session: imageSession, tokenStore: tokenStore)
 
     func authAPI(baseURL: URL) -> AuthAPI {
         AuthAPI(baseURL: baseURL, session: apiSession)

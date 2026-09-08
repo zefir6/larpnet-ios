@@ -151,28 +151,31 @@ final class FriendicaAPIClient: Sendable {
     // same way: `src/Factory/Api/Friendica/Photo.php` for the single/list photo field names,
     // `Module/Api/Friendica/Photoalbum/Index.php` for the album-list shape.
 
-    private struct PhotoAlbumsEnvelope: Decodable {
-        let albums: [FriendicaPhotoAlbum]
-    }
-
-    private struct PhotoListEnvelope: Decodable {
-        let photo: LossyArray<FriendicaPhoto>
-    }
-
     /// `GET api/friendica/photoalbums` -- every album name this account has, with a photo count.
     /// Album *creation* has no dedicated endpoint: uploading the first photo with a new album
     /// name implicitly creates it (see `uploadPhoto`).
+    ///
+    /// Response is a **bare JSON array**, not `{"albums": [...]}` -- confirmed live (a
+    /// `DecodingError.typeMismatch` against an enveloped-object decode target, "expected
+    /// Dictionary but found an array"). The PHP source builds `['albums' => $items]` before
+    /// handing it to `addFormattedContent`, which reads like it should produce an object, but
+    /// that wrapper key is apparently only used to name the root element for XML output --
+    /// the JSON formatter strips it and serializes the array bare. `photos(inAlbum:)` below
+    /// shares the exact same `addFormattedContent` call shape (`['photo' => [...]]`), so it
+    /// almost certainly has the identical bare-array shape even though only the albums endpoint
+    /// has been confirmed live so far.
     func photoAlbums() async throws -> [FriendicaPhotoAlbum] {
-        let envelope: PhotoAlbumsEnvelope = try await send(path: "api/friendica/photoalbums")
-        return envelope.albums
+        let array: LossyArray<FriendicaPhotoAlbum> = try await send(path: "api/friendica/photoalbums")
+        return array.elements
     }
 
-    /// `GET api/friendica/photoalbum?album=<name>` -- every photo in one album.
+    /// `GET api/friendica/photoalbum?album=<name>` -- every photo in one album. See
+    /// `photoAlbums()`'s doc comment for why this decodes a bare array, not `{"photo": [...]}`.
     func photos(inAlbum album: String) async throws -> [FriendicaPhoto] {
-        let envelope: PhotoListEnvelope = try await send(
+        let array: LossyArray<FriendicaPhoto> = try await send(
             path: "api/friendica/photoalbum", query: [URLQueryItem(name: "album", value: album)]
         )
-        return envelope.photo.elements
+        return array.elements
     }
 
     /// `POST api/friendica/photo/create` -- `media` as a multipart file part (confirmed against
