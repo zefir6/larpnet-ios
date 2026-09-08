@@ -49,6 +49,14 @@ targets:
     info:
       path: Generated/Info.plist
       properties:
+        # XcodeGen bakes a literal CFBundleShortVersionString/CFBundleVersion default (1.0 / 1)
+        # into the generated Info.plist template when these keys aren't listed here explicitly
+        # -- confirmed live: MARKETING_VERSION/CURRENT_PROJECT_VERSION above had no effect on a
+        # freshly-regenerated Generated/Info.plist until these were added. Referencing the build
+        # settings as variables (not resolving them here) makes Xcode substitute the real value
+        # at build time, for both local and Xcode Cloud archive builds.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
