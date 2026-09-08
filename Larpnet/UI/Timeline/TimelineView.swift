@@ -2,20 +2,25 @@ import SwiftUI
 
 struct TimelineView: View {
     @State private var viewModel: TimelineViewModel
+    let appContainer: AppContainer
     let onOpenThread: (Status) -> Void
     let onOpenProfile: (String) -> Void
     let onReply: (Status) -> Void
+    let onOpenHashtag: (String) -> Void
 
     init(
         kind: TimelineKind, appContainer: AppContainer,
         onOpenThread: @escaping (Status) -> Void,
         onOpenProfile: @escaping (String) -> Void,
-        onReply: @escaping (Status) -> Void
+        onReply: @escaping (Status) -> Void,
+        onOpenHashtag: @escaping (String) -> Void = { _ in }
     ) {
         _viewModel = State(initialValue: TimelineViewModel(kind: kind, appContainer: appContainer))
+        self.appContainer = appContainer
         self.onOpenThread = onOpenThread
         self.onOpenProfile = onOpenProfile
         self.onReply = onReply
+        self.onOpenHashtag = onOpenHashtag
     }
 
     var body: some View {
@@ -28,7 +33,7 @@ struct TimelineView: View {
             }
 
             LazyVStack(spacing: 10) {
-                ForEach(viewModel.statuses) { status in
+                ForEach(viewModel.visibleStatuses) { status in
                     StatusCard(
                         status: status,
                         onOpenThread: onOpenThread,
@@ -36,7 +41,9 @@ struct TimelineView: View {
                         onReply: onReply,
                         onToggleFavourite: { viewModel.toggleFavourite(id: $0) },
                         onToggleReblog: { viewModel.toggleReblog(id: $0) },
-                        onToggleBookmark: { viewModel.toggleBookmark(id: $0) }
+                        onToggleBookmark: { viewModel.toggleBookmark(id: $0) },
+                        onOpenHashtag: onOpenHashtag,
+                        currentAccountId: appContainer.currentAccountStore.accountId
                     )
                     .padding(.horizontal, 6)
                     if status.id == viewModel.statuses.last?.id {
@@ -67,5 +74,24 @@ struct TimelineView: View {
         .task { await viewModel.loadInitial() }
         .onAppear { viewModel.startPolling() }
         .onDisappear { viewModel.stopPolling() }
+        .postModerationHost(
+            onHidePost: { id in
+                appContainer.hiddenPostsStore.add(id)
+            },
+            onBlockPost: { id in
+                appContainer.blockedPostsStore.add(id)
+            },
+            onBlockAccount: { accountId in
+                viewModel.removeStatuses(byAccount: accountId)
+                Task { try? await appContainer.friendicaAPI().block(id: accountId) }
+            },
+            onSubmitReport: { target, category, comment in
+                Task {
+                    try? await appContainer.friendicaAPI().report(
+                        accountId: target.accountId, statusIds: target.statusIds, comment: comment, category: category
+                    )
+                }
+            }
+        )
     }
 }

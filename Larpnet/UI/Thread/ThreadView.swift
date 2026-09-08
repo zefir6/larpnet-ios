@@ -2,20 +2,25 @@ import SwiftUI
 
 struct ThreadView: View {
     @State private var viewModel: ThreadViewModel
+    let appContainer: AppContainer
     let onOpenThread: (Status) -> Void
     let onOpenProfile: (String) -> Void
     let onReply: (Status) -> Void
+    let onOpenHashtag: (String) -> Void
 
     init(
         statusId: String, appContainer: AppContainer,
         onOpenThread: @escaping (Status) -> Void,
         onOpenProfile: @escaping (String) -> Void,
-        onReply: @escaping (Status) -> Void
+        onReply: @escaping (Status) -> Void,
+        onOpenHashtag: @escaping (String) -> Void = { _ in }
     ) {
         _viewModel = State(initialValue: ThreadViewModel(statusId: statusId, appContainer: appContainer))
+        self.appContainer = appContainer
         self.onOpenThread = onOpenThread
         self.onOpenProfile = onOpenProfile
         self.onReply = onReply
+        self.onOpenHashtag = onOpenHashtag
     }
 
     /// A thread opened on a reply deep in a conversation (e.g. from a "mentioned you"
@@ -72,7 +77,36 @@ struct ThreadView: View {
         }
         .navigationTitle("Post")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    viewModel.toggleFollow()
+                } label: {
+                    Image(systemName: viewModel.isFollowingThread ? "bookmark.fill" : "bookmark")
+                }
+                .disabled(viewModel.rootStatusId == nil)
+            }
+        }
         .task { await viewModel.load() }
+        .postModerationHost(
+            onHidePost: { id in
+                appContainer.hiddenPostsStore.add(id)
+            },
+            onBlockPost: { id in
+                appContainer.blockedPostsStore.add(id)
+            },
+            onBlockAccount: { accountId in
+                viewModel.removeStatuses(byAccount: accountId)
+                Task { try? await appContainer.friendicaAPI().block(id: accountId) }
+            },
+            onSubmitReport: { target, category, comment in
+                Task {
+                    try? await appContainer.friendicaAPI().report(
+                        accountId: target.accountId, statusIds: target.statusIds, comment: comment, category: category
+                    )
+                }
+            }
+        )
     }
 
     private func divider() -> some View {
@@ -123,7 +157,9 @@ struct ThreadView: View {
             onReply: onReply,
             onToggleFavourite: { viewModel.toggleFavourite(id: $0) },
             onToggleReblog: { viewModel.toggleReblog(id: $0) },
-            onToggleBookmark: { viewModel.toggleBookmark(id: $0) }
+            onToggleBookmark: { viewModel.toggleBookmark(id: $0) },
+            onOpenHashtag: onOpenHashtag,
+            currentAccountId: appContainer.currentAccountStore.accountId
         )
     }
 }

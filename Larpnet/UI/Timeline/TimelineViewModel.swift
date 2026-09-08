@@ -3,6 +3,7 @@ import Foundation
 enum TimelineKind {
     case home
     case local
+    case hashtag(String)
 }
 
 /// Direct port of Android's `ui/timeline/TimelineViewModel.kt`: pull-to-refresh, infinite
@@ -30,6 +31,15 @@ final class TimelineViewModel {
         self.appContainer = appContainer
     }
 
+    /// `statuses` filtered against the hidden/blocked local post-id sets -- computed, not
+    /// filtered at assignment time, so unhiding/unblocking from the management screens reflects
+    /// immediately with no re-fetch. Same `id`-or-`reblog?.id` duality every optimistic-update
+    /// method below already uses, since a boost's own id differs from its wrapped status's id.
+    var visibleStatuses: [Status] {
+        let excluded = appContainer.hiddenPostsStore.idSet.union(appContainer.blockedPostsStore.idSet)
+        return statuses.filter { !excluded.contains($0.id) && !(($0.reblog?.id).map(excluded.contains) ?? false) }
+    }
+
     private func fetchPage(maxId: String?, sinceId: String? = nil) async throws -> Page<Status> {
         let api = try appContainer.friendicaAPI()
         switch kind {
@@ -37,7 +47,17 @@ final class TimelineViewModel {
             return try await api.homeTimeline(maxId: maxId, sinceId: sinceId)
         case .local:
             return try await api.publicTimeline(maxId: maxId, sinceId: sinceId, local: true)
+        case .hashtag(let tag):
+            return try await api.hashtagTimeline(tag: tag, maxId: maxId, sinceId: sinceId)
         }
+    }
+
+    /// Removes every post by `accountId` from the currently-loaded list -- called right after
+    /// blocking that account so their other already-loaded posts disappear immediately, not
+    /// just the one post the block action was triggered from. Local-only; the actual
+    /// `block(id:)` network call is fired separately by the caller.
+    func removeStatuses(byAccount accountId: String) {
+        statuses.removeAll { $0.account.id == accountId || $0.reblog?.account.id == accountId }
     }
 
     func loadInitial() async {

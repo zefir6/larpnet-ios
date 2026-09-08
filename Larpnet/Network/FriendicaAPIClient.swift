@@ -99,6 +99,35 @@ final class FriendicaAPIClient: Sendable {
         }
     }
 
+    // MARK: - Blocks & Reports
+
+    func block(id: String) async throws -> Relationship {
+        try await send(path: "api/v1/accounts/\(id)/block", method: "POST")
+    }
+
+    func unblock(id: String) async throws -> Relationship {
+        try await send(path: "api/v1/accounts/\(id)/unblock", method: "POST")
+    }
+
+    /// Same Link-header pagination shape as `followers`/`getAccountStatuses`.
+    func blockedAccounts(maxId: String? = nil) async throws -> Page<Account> {
+        var query: [URLQueryItem] = []
+        if let maxId { query.append(URLQueryItem(name: "max_id", value: maxId)) }
+        return try await sendPaged(path: "api/v1/blocks", query: query)
+    }
+
+    /// `category` is one of "spam" | "violation" | "other" -- Friendica may not enforce it
+    /// server-side, so don't build UI whose correctness depends on it being honored.
+    /// `statusIds: []` reports the account alone, with no specific post attached.
+    func report(accountId: String, statusIds: [String], comment: String?, category: String) async throws {
+        var fields = ["account_id": accountId, "category": category]
+        if let comment { fields["comment"] = comment }
+        let request = try buildFormRequest(
+            path: "api/v1/reports", fields: fields, arrayField: ("status_ids[]", statusIds)
+        )
+        _ = try await perform(request)
+    }
+
     // MARK: - Notifications
 
     func notifications(maxId: String? = nil, sinceId: String? = nil) async throws -> Page<LarpnetNotification> {
@@ -132,6 +161,12 @@ final class FriendicaAPIClient: Sendable {
             query.append(URLQueryItem(name: "local", value: local ? "true" : "false"))
         }
         return try await sendPaged(path: "api/v1/timelines/public", query: query)
+    }
+
+    func hashtagTimeline(
+        tag: String, maxId: String? = nil, sinceId: String? = nil, limit: Int = 40
+    ) async throws -> Page<Status> {
+        try await sendPaged(path: "api/v1/timelines/tag/\(tag)", query: pagingQuery(maxId: maxId, sinceId: sinceId, limit: limit))
     }
 
     // MARK: - Statuses

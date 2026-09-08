@@ -13,15 +13,36 @@ final class ThreadViewModel {
     private(set) var descendants: [ThreadRenderItem] = []
     private(set) var collapsedIds: Set<String> = []
     private(set) var isLoading = false
+    /// Raw `context.descendants.count` from `load()` -- the total reply count for this thread,
+    /// independent of collapse state and of hide/block filtering (both of which change what
+    /// `descendants` actually renders). This, not `focus?.repliesCount` or `descendants.count`,
+    /// is what gets written to `FollowedThreadsStore` -- see that store's doc comment for why
+    /// `repliesCount`'s semantics are unsafe to rely on here.
+    private(set) var totalDescendantCount = 0
     var errorMessage: String?
 
     private var tree: ThreadNode?
     private let statusId: String
     private let appContainer: AppContainer
+    /// Accounts blocked from within this thread during the current session -- not persisted
+    /// (blocking is server-authoritative; the server excludes the account going forward on its
+    /// own), just enough to immediately drop that account's *replies* from view without a
+    /// re-fetch. Ancestors and the focus post are deliberately never pruned by this, even if
+    /// authored by a blocked account -- same rationale as hide/block-post filtering below: they
+    /// are the context the user navigated here to read, and removing one would break the
+    /// thread's continuity.
+    private var locallyBlockedAccountIds: Set<String> = []
 
     init(statusId: String, appContainer: AppContainer) {
         self.statusId = statusId
         self.appContainer = appContainer
+    }
+
+    var rootStatusId: String? { ancestors.first?.id ?? focus?.id }
+
+    var isFollowingThread: Bool {
+        guard let rootStatusId else { return false }
+        return appContainer.followedThreadsStore.isFollowing(id: rootStatusId)
     }
 
     func load() async {
@@ -36,8 +57,12 @@ final class ThreadViewModel {
             focus = status
             ancestors = context.ancestors.sorted { $0.createdAt < $1.createdAt }
             tree = ThreadBuilder.buildTree(focus: status, descendants: context.descendants)
+            totalDescendantCount = context.descendants.count
             collapsedIds = []
             refreshDescendants()
+            if let rootStatusId, appContainer.followedThreadsStore.isFollowing(id: rootStatusId) {
+                appContainer.followedThreadsStore.markSeen(id: rootStatusId, replyCount: totalDescendantCount)
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -49,12 +74,32 @@ final class ThreadViewModel {
         refreshDescendants()
     }
 
+    func toggleFollow() {
+        guard let rootStatusId else { return }
+        if appContainer.followedThreadsStore.isFollowing(id: rootStatusId) {
+            appContainer.followedThreadsStore.unfollow(id: rootStatusId)
+        } else {
+            appContainer.followedThreadsStore.follow(id: rootStatusId, currentReplyCount: totalDescendantCount)
+        }
+    }
+
+    /// Drops `accountId`'s replies from `descendants` immediately after blocking them -- see
+    /// `locallyBlockedAccountIds`'s doc comment for why ancestors/focus are untouched.
+    func removeStatuses(byAccount accountId: String) {
+        locallyBlockedAccountIds.insert(accountId)
+        refreshDescendants()
+    }
+
     private func refreshDescendants() {
         guard let tree else {
             descendants = []
             return
         }
-        descendants = ThreadBuilder.flatten(tree, collapsedIds: collapsedIds)
+        let flattened = ThreadBuilder.flatten(tree, collapsedIds: collapsedIds)
+        let excludedIds = appContainer.hiddenPostsStore.idSet.union(appContainer.blockedPostsStore.idSet)
+        descendants = ThreadBuilder.filterExcluded(
+            flattened, excludedStatusIds: excludedIds, excludedAccountIds: locallyBlockedAccountIds
+        )
     }
 
     /// Takes an `id`, not a `Status` snapshot -- see `TimelineViewModel`'s toggle methods for

@@ -145,12 +145,41 @@ final class TokenStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "bottom_nav_order") }
     }
 
+    /// Generic comma-joined-string-list accessor, backing `LocalPostFilterStore`'s two
+    /// instances (hidden/blocked post ids). Not secrets, so `UserDefaults`.
+    func stringList(for key: String) -> String? {
+        defaults.string(forKey: key)
+    }
+
+    func setStringList(_ value: String?, for key: String) {
+        defaults.set(value, forKey: key)
+    }
+
+    /// JSON-encoded `[FollowedThread]`. Not a secret, so `UserDefaults`, and deliberately *not*
+    /// cleared by `clear()` -- same convenience-across-relogin treatment as `recentTags`.
+    var followedThreadsJSON: String? {
+        get { defaults.string(forKey: "followed_threads") }
+        set { defaults.set(newValue, forKey: "followed_threads") }
+    }
+
+    /// The logged-in account's own id, used to tell "is this my post" apart from someone
+    /// else's in `StatusCard`. Unlike every other property below `pushEnabled`, this one *is*
+    /// session identity, not a UI preference -- it must be cleared on logout, or a different
+    /// account logging in on the same device would silently inherit the previous user's id and
+    /// mis-flag ownership of their posts.
+    var currentAccountId: String? {
+        get { defaults.string(forKey: "current_account_id") }
+        set { defaults.set(newValue, forKey: "current_account_id") }
+    }
+
     /// Clears the access token and cached app registration (client id/secret), but leaves
-    /// `pushEnabled` alone -- same split as Android's `clear()`.
+    /// `pushEnabled` alone -- same split as Android's `clear()`. Also clears `currentAccountId`
+    /// -- session identity, not a UI preference like the properties above.
     func clear() {
         instanceBaseURL = nil
         clientId = nil
         clientSecret = nil
         accessToken = nil
+        currentAccountId = nil
     }
 }
