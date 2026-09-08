@@ -30,6 +30,11 @@ struct LarpnetApp: App {
                                 tokenStore: appContainer.tokenStore
                             )
                         }
+                        Task {
+                            if let account = try? await appContainer.friendicaAPI().verifyCredentials() {
+                                appContainer.currentAccountStore.set(account.id)
+                            }
+                        }
                     })
                 }
             }
@@ -43,6 +48,9 @@ struct LarpnetApp: App {
                 await BackgroundRefresh.requestAuthorizationIfNeededAndSchedule(
                     tokenStore: appContainer.tokenStore
                 )
+                if let account = try? await appContainer.friendicaAPI().verifyCredentials() {
+                    appContainer.currentAccountStore.set(account.id)
+                }
             }
         }
     }

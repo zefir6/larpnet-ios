@@ -1,0 +1,69 @@
+{
+    "id": "244862",
+    "created_at": "2026-08-18T12:30:24.000Z",
+    "edited_at": null,
+    "in_reply_to_id": null,
+    "in_reply_to_status": null,
+    "in_reply_to_account_id": null,
+    "sensitive": false,
+    "spoiler_text": "",
+    "visibility": "public",
+    "language": "en",
+    "uri": "https://larpnet.pl/users/robindlaws/statuses/244862",
+    "url": "https://larpnet.pl/@robindlaws/244862",
+    "replies_count": 0,
+    "reblogs_count": 0,
+    "favourites_count": 0,
+    "favourited": false,
+    "reblogged": false,
+    "muted": false,
+    "bookmarked": false,
+    "content": "<p>Larp session recap <a href=\"https://larpnet.pl/tag/larp\" class=\"mention hashtag\" rel=\"tag\">#<span>larp</span></a> <a href=\"https://larpnet.pl/tag/warsaw\" class=\"mention hashtag\" rel=\"tag\">#<span>warsaw</span></a></p>",
+    "filtered": [],
+    "reblog": null,
+    "quote": null,
+    "application": {
+        "name": "Mastodon",
+        "website": null
+    },
+    "account": {
+        "id": "5916",
+        "username": "robindlaws",
+        "acct": "robindlaws@dice.camp",
+        "display_name": "Robin D. Laws",
+        "locked": false,
+        "bot": false,
+        "discoverable": true,
+        "indexable": true,
+        "group": false,
+        "created_at": "2026-06-03T10:31:55.000Z",
+        "note": "Writer, game designer, podcaster.",
+        "url": "https://dice.camp/@robindlaws",
+        "uri": "https://dice.camp/users/robindlaws",
+        "avatar": "https://larpnet.pl/photo/contact/320/910d385c-d956afb9-a42059683490ec33?ts=1780482715",
+        "avatar_static": "https://larpnet.pl/photo/contact/320/910d385c-d956afb9-a42059683490ec33?ts=1780482715&static=1",
+        "header": "https://larpnet.pl/photo/header/910d385c-d956afb9-a42059683490ec33?ts=1780482715",
+        "header_static": "https://larpnet.pl/photo/header/910d385c-d956afb9-a42059683490ec33?ts=1780482715&static=1",
+        "followers_count": 3251,
+        "following_count": 175,
+        "statuses_count": 19,
+        "last_status_at": "2026-08-18T00:00:00.000Z",
+        "hide_collections": null,
+        "emojis": [],
+        "fields": []
+    },
+    "media_attachments": [],
+    "mentions": [],
+    "tags": [
+        {
+            "name": "larp",
+            "url": "https://larpnet.pl/tag/larp"
+        },
+        {
+            "name": "warsaw",
+            "url": "https://larpnet.pl/tag/warsaw"
+        }
+    ],
+    "emojis": [],
+    "card": null
+}

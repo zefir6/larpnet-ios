@@ -17,6 +17,14 @@ final class ProfileViewModel {
     private let appContainer: AppContainer
     private var nextMaxId: String?
 
+    /// `statuses` filtered against the hidden/blocked local post-id sets, computed so an
+    /// unhide/unblock from the management screens reflects immediately -- same approach as
+    /// `TimelineViewModel.visibleStatuses`.
+    var visibleStatuses: [Status] {
+        let excluded = appContainer.hiddenPostsStore.idSet.union(appContainer.blockedPostsStore.idSet)
+        return statuses.filter { !excluded.contains($0.id) && !(($0.reblog?.id).map(excluded.contains) ?? false) }
+    }
+
     init(accountId: String?, appContainer: AppContainer) {
         self.accountId = accountId
         self.isOwnProfile = accountId == nil
@@ -33,6 +41,7 @@ final class ProfileViewModel {
                 resolvedAccount = try await api.getAccount(id: accountId)
             } else {
                 resolvedAccount = try await api.verifyCredentials()
+                appContainer.currentAccountStore.set(resolvedAccount.id)
             }
             account = resolvedAccount
             let page = try await api.getAccountStatuses(id: resolvedAccount.id)
@@ -111,6 +120,13 @@ final class ProfileViewModel {
     func delete(_ status: Status) {
         statuses.removeAll { $0.id == status.id }
         Task { try? await appContainer.friendicaAPI().deleteStatus(id: status.id) }
+    }
+
+    /// Local-only removal of every post by `accountId` -- called right after blocking that
+    /// account so their other already-loaded posts disappear immediately. The `block(id:)`
+    /// network call itself is fired separately by the caller.
+    func removeStatuses(byAccount accountId: String) {
+        statuses.removeAll { $0.account.id == accountId || $0.reblog?.account.id == accountId }
     }
 
     /// See `TimelineViewModel.apply` -- `id` is the unwrapped status's id, but `statuses` holds

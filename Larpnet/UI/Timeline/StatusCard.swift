@@ -31,10 +31,30 @@ struct StatusCard: View {
     var onToggleFavourite: (String) -> Void = { _ in }
     var onToggleReblog: (String) -> Void = { _ in }
     var onToggleBookmark: (String) -> Void = { _ in }
+    /// Tag chip tapped, or an in-body hashtag link matching one of `status.tags` intercepted via
+    /// `openURL` below -- both hand back the bare tag name (no leading `#`).
+    var onOpenHashtag: (String) -> Void = { _ in }
+    /// The logged-in user's own account id, used to gate the moderation context menu away from
+    /// your own posts. `nil` (the default) is treated as "not own" -- the safe default for any
+    /// caller that doesn't pass one, matching today's un-gated behavior.
+    var currentAccountId: String? = nil
+    /// Non-nil only on `ProfileView`'s own-profile screen -- the sole place a post can currently
+    /// be deleted. `isOwnPost` already implies "this is a post `currentAccountId` authored", so
+    /// folding Delete into this same `.contextMenu` (rather than a second `.contextMenu` layered
+    /// on top by the caller) avoids two context-menu modifiers competing over the same view.
+    var onDelete: ((Status) -> Void)? = nil
 
+    @Environment(\.moderationActions) private var moderationActions
     @State private var galleryContext: MediaGalleryContext?
 
     private var displayed: Status { status.reblog ?? status }
+    private var isOwnPost: Bool { currentAccountId != nil && currentAccountId == displayed.account.id }
+    /// Whether there's anything for the "..." button / long-press menu to show at all -- used to
+    /// hide the button entirely rather than offer a dead-end tap target when neither applies
+    /// (e.g. `LocalPostListView`'s read-only rows, which attach no `.postModerationHost`).
+    private var hasMenuContent: Bool {
+        isOwnPost ? onDelete != nil : moderationActions != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -75,9 +95,27 @@ struct StatusCard: View {
                     }
                     .font(.subheadline)
                 }
+
+                if !displayed.tags.isEmpty {
+                    tagChips
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture { onOpenThread(displayed) }
+            // Friendica already emits hashtags as inline `<a href>` anchors inside a post's
+            // HTML body, which `HTMLContentView` renders as tappable `AttributedString` links --
+            // without this, tapping one falls through to the system default and opens Safari,
+            // while the tag chip row below opens the in-app hashtag timeline for the exact same
+            // tag. Intercepting here makes both affordances behave identically; anything that
+            // isn't a recognized tag link (mentions, external URLs) still falls through to
+            // `.systemAction`, unchanged from today.
+            .environment(\.openURL, OpenURLAction { url in
+                guard let tag = displayed.tags.first(where: { $0.url == url.absoluteString }) else {
+                    return .systemAction
+                }
+                onOpenHashtag(tag.name)
+                return .handled
+            })
 
             if !displayed.mediaAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -122,6 +160,23 @@ struct StatusCard: View {
                     isActive: displayed.bookmarked, tint: .blue, identifier: "bookmark-\(displayed.id)"
                 ) { onToggleBookmark(displayed.id) }
                 Spacer(minLength: 0)
+                // An explicit, always-visible tap target for moderation, not just a long-press
+                // context menu -- long press discoverability is poor (nothing on the card hints
+                // it's there), so this "..." button in the row's trailing/bottom-right corner is
+                // the primary way in; the `.contextMenu` below stays as a secondary shortcut for
+                // anyone used to that gesture, sharing the exact same menu content.
+                if hasMenuContent {
+                    Menu {
+                        moderationMenuItems
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .tint(.secondary)
+                    .accessibilityIdentifier("more-\(displayed.id)")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -129,6 +184,56 @@ struct StatusCard: View {
         .modifier(CardChrome(flat: flat))
         .fullScreenCover(item: $galleryContext) { context in
             MediaGalleryView(context: context)
+        }
+        .contextMenu {
+            moderationMenuItems
+        }
+    }
+
+    /// Delete (own posts) or hide/block/report (everyone else's) -- shared between the
+    /// always-visible "..." button and the long-press `.contextMenu`, so both trigger the exact
+    /// same actions. Gated on both `moderationActions` being present (screens like the
+    /// Hidden/Blocked Posts and Following lists render `StatusCard` with no
+    /// `.postModerationHost` attached, so there's nothing to hide/block/report from there) and
+    /// `!isOwnPost` -- never offer "Block yourself"/"Report yourself".
+    @ViewBuilder
+    private var moderationMenuItems: some View {
+        if isOwnPost {
+            if let onDelete {
+                Button("Delete", role: .destructive) { onDelete(displayed) }
+            }
+        } else if let actions = moderationActions {
+            Button("Hide post") { actions.hide(displayed.id) }
+            Button("Block post", role: .destructive) { actions.requestBlockPost(displayed.id, displayed.account.id) }
+            Divider()
+            Button("Block @\(displayed.account.acct)", role: .destructive) { actions.blockAccount(displayed.account.id) }
+            Button("Report post\u{2026}") { actions.requestReportPost(displayed.id, displayed.account.id, displayed.account.acct) }
+            Button("Report @\(displayed.account.acct)\u{2026}") { actions.requestReportAccount(displayed.account.id, displayed.account.acct) }
+        }
+    }
+
+    /// Read-only capsule chips surfacing the hashtags Friendica already attached to this post
+    /// (`Status.tags`) -- visually similar to `TagsSectionView`'s compose-time chip, but not
+    /// shared code with it: that one is interactive/selection-oriented for choosing tags to
+    /// post with, this one is a plain tap-to-open-hashtag-timeline button. Small enough that
+    /// forcing a shared abstraction between the two isn't worth it.
+    private var tagChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(displayed.tags, id: \.name) { tag in
+                    Button {
+                        onOpenHashtag(tag.name)
+                    } label: {
+                        Text("#\(tag.name)")
+                            .font(.caption)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(LarpnetTheme.pageBackground))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 

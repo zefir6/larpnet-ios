@@ -13,6 +13,11 @@ enum AppRoute: Hashable {
     case messages
     case newMessage
     case messageThread(accountId: String, conversationId: String?)
+    case blockedAccounts
+    case hiddenPosts
+    case blockedPosts
+    case followedThreads
+    case hashtag(String)
 }
 
 /// Compose is presented as a `.sheet`, not a pushed route -- closer to iOS convention for a

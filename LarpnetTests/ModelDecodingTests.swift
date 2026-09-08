@@ -34,6 +34,13 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(status.createdAt, expected.date(from: "2026-08-18T12:30:24.000Z"))
     }
 
+    func testDecodesStatusTags() throws {
+        let data = try loadFixture("status_with_tags")
+        let status = try FriendicaJSON.decoder.decode(Status.self, from: data)
+        XCTAssertEqual(status.tags.map(\.name), ["larp", "warsaw"])
+        XCTAssertEqual(status.tags.map(\.url), ["https://larpnet.pl/tag/larp", "https://larpnet.pl/tag/warsaw"])
+    }
+
     func testDecodesStatusWithNullsAndMissingKeys() throws {
         let data = try loadFixture("status_nulls_and_missing")
         let status = try FriendicaJSON.decoder.decode(Status.self, from: data)

@@ -39,6 +39,21 @@ struct MediaAttachment: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+struct StatusTag: Decodable, Sendable, Hashable {
+    var name: String
+    var url: String
+
+    enum CodingKeys: String, CodingKey {
+        case name, url
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = c.decode(.name, default: "")
+        url = c.decode(.url, default: "")
+    }
+}
+
 struct PollOption: Decodable, Sendable, Hashable {
     var title: String
     var votesCount: Int?
@@ -114,6 +129,10 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
     var reblogsCount: Int
     var repliesCount: Int
     var language: String?
+    // Not part of `==` below -- unlike favourited/reblogged/etc., tags never change for a given
+    // status id after decode, so they don't need to participate in the re-render-triggering
+    // equality check.
+    var tags: [StatusTag]
 
     var reblog: Status? {
         get { _reblog?.value }
@@ -143,7 +162,7 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, content, sensitive, visibility, account, reblog, url, poll, favourited,
-             reblogged, bookmarked, language
+             reblogged, bookmarked, language, tags
         case createdAt = "created_at"
         case spoilerText = "spoiler_text"
         case inReplyToId = "in_reply_to_id"
@@ -177,6 +196,7 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
         reblogsCount = c.decode(.reblogsCount, default: 0)
         repliesCount = c.decode(.repliesCount, default: 0)
         language = try? c.decodeIfPresent(String.self, forKey: .language)
+        tags = (try? c.decodeIfPresent(LossyArray<StatusTag>.self, forKey: .tags))??.elements ?? []
     }
 
     init(
@@ -186,7 +206,7 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
         url: String? = nil, mediaAttachments: [MediaAttachment] = [], poll: Poll? = nil,
         favourited: Bool = false, reblogged: Bool = false, bookmarked: Bool = false,
         favouritesCount: Int = 0, reblogsCount: Int = 0, repliesCount: Int = 0,
-        language: String? = nil
+        language: String? = nil, tags: [StatusTag] = []
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -208,6 +228,7 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
         self.reblogsCount = reblogsCount
         self.repliesCount = repliesCount
         self.language = language
+        self.tags = tags
     }
 }
 

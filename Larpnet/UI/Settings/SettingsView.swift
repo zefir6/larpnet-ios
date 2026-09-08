@@ -71,6 +71,24 @@ struct SettingsView: View {
             .onChange(of: viewModel.discoverable) { _, _ in viewModel.savePrivacy() }
             .onChange(of: viewModel.bot) { _, _ in viewModel.savePrivacy() }
 
+            Section("Moderation") {
+                NavigationLink(value: AppRoute.blockedAccounts) {
+                    Label("Blocked users", systemImage: "person.crop.circle.badge.xmark")
+                }
+                NavigationLink(value: AppRoute.hiddenPosts) {
+                    Label("Hidden posts", systemImage: "eye.slash")
+                }
+                NavigationLink(value: AppRoute.blockedPosts) {
+                    Label("Blocked posts", systemImage: "hand.raised")
+                }
+            }
+
+            Section("Following") {
+                NavigationLink(value: AppRoute.followedThreads) {
+                    Label("Followed threads", systemImage: "bookmark")
+                }
+            }
+
             // Read-only -- the server is changed via the iOS Settings app's own "Larpnet"
             // page (`Settings.bundle/Root.plist`), not here. An OAuth session is tied to one
             // instance, so editing it in-app would need to force an immediate logout right in

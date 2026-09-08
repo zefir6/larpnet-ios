@@ -84,4 +84,22 @@ enum ThreadBuilder {
     private static func countDescendants(_ node: ThreadNode) -> Int {
         node.children.count + node.children.reduce(0) { $0 + countDescendants($1) }
     }
+
+    /// Drops hidden/blocked rows from an already-`flatten`ed list -- called post-flatten, never
+    /// by pruning `ThreadNode`s before `flatten` runs, since removing a node pre-tree would
+    /// orphan its children (they'd never be marked `known` in `buildTree`'s worklist). Dropping
+    /// an already-flattened row just removes that row; its children still render at their
+    /// original depth, since each `ThreadRenderItem`'s `depth` was computed independently of
+    /// whether any ancestor row is later filtered out.
+    static func filterExcluded(
+        _ items: [ThreadRenderItem], excludedStatusIds: Set<String>, excludedAccountIds: Set<String> = []
+    ) -> [ThreadRenderItem] {
+        items.filter { item in
+            if excludedAccountIds.contains(item.status.account.id) { return false }
+            if let reblogAccountId = item.status.reblog?.account.id, excludedAccountIds.contains(reblogAccountId) { return false }
+            if excludedStatusIds.contains(item.status.id) { return false }
+            if let reblogId = item.status.reblog?.id, excludedStatusIds.contains(reblogId) { return false }
+            return true
+        }
+    }
 }

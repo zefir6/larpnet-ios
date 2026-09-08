@@ -44,7 +44,8 @@ struct RootView: View {
                     kind: .home, appContainer: appContainer,
                     onOpenThread: { homePath.append(.thread(statusId: $0.id)) },
                     onOpenProfile: { homePath.append(.profile(accountId: $0)) },
-                    onReply: { composeContext = ComposeContext(replyToId: $0.id) }
+                    onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                    onOpenHashtag: { homePath.append(.hashtag($0)) }
                 )
                 .navigationTitle("Home")
                 .navigationBarTitleDisplayMode(.inline)
@@ -67,7 +68,8 @@ struct RootView: View {
                     kind: .local, appContainer: appContainer,
                     onOpenThread: { localPath.append(.thread(statusId: $0.id)) },
                     onOpenProfile: { localPath.append(.profile(accountId: $0)) },
-                    onReply: { composeContext = ComposeContext(replyToId: $0.id) }
+                    onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                    onOpenHashtag: { localPath.append(.hashtag($0)) }
                 )
                 .navigationTitle("Larpnet")
                 .navigationBarTitleDisplayMode(.inline)
@@ -120,7 +122,8 @@ struct RootView: View {
                             statusId: statusId, appContainer: appContainer,
                             onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
                             onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
-                            onReply: { composeContext = ComposeContext(replyToId: $0.id) }
+                            onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                            onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) }
                         )
                     case .profile(let accountId):
                         ProfileView(
@@ -128,7 +131,8 @@ struct RootView: View {
                             onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
                             onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
                             onReply: { composeContext = ComposeContext(replyToId: $0.id) },
-                            onEditProfile: { path.wrappedValue.append(.editProfile) }
+                            onEditProfile: { path.wrappedValue.append(.editProfile) },
+                            onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) }
                         )
                     case .editProfile:
                         EditProfileView(appContainer: appContainer, onSaved: {})
@@ -157,6 +161,37 @@ struct RootView: View {
                         )
                     case .messageThread(let accountId, let conversationId):
                         ConversationThreadView(accountId: accountId, conversationId: conversationId, appContainer: appContainer)
+                    case .blockedAccounts:
+                        BlockedAccountsView(appContainer: appContainer)
+                    case .hiddenPosts:
+                        LocalPostListView(
+                            title: "Hidden posts", removeActionLabel: "Unhide",
+                            store: appContainer.hiddenPostsStore, appContainer: appContainer,
+                            onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) }
+                        )
+                    case .blockedPosts:
+                        LocalPostListView(
+                            title: "Blocked posts", removeActionLabel: "Unblock",
+                            store: appContainer.blockedPostsStore, appContainer: appContainer,
+                            onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) }
+                        )
+                    case .followedThreads:
+                        FollowedThreadsView(
+                            appContainer: appContainer,
+                            onOpenThread: { path.wrappedValue.append(.thread(statusId: $0)) }
+                        )
+                    case .hashtag(let tag):
+                        TimelineView(
+                            kind: .hashtag(tag), appContainer: appContainer,
+                            onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                            onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) }
+                        )
+                        .navigationTitle("#\(tag)")
+                        .navigationBarTitleDisplayMode(.inline)
                     }
                 }
         }

@@ -2,23 +2,28 @@ import SwiftUI
 
 struct ProfileView: View {
     @State private var viewModel: ProfileViewModel
+    let appContainer: AppContainer
     let onOpenThread: (Status) -> Void
     let onOpenProfile: (String) -> Void
     let onReply: (Status) -> Void
     let onEditProfile: () -> Void
+    let onOpenHashtag: (String) -> Void
 
     init(
         accountId: String?, appContainer: AppContainer,
         onOpenThread: @escaping (Status) -> Void,
         onOpenProfile: @escaping (String) -> Void,
         onReply: @escaping (Status) -> Void,
-        onEditProfile: @escaping () -> Void
+        onEditProfile: @escaping () -> Void,
+        onOpenHashtag: @escaping (String) -> Void = { _ in }
     ) {
         _viewModel = State(initialValue: ProfileViewModel(accountId: accountId, appContainer: appContainer))
+        self.appContainer = appContainer
         self.onOpenThread = onOpenThread
         self.onOpenProfile = onOpenProfile
         self.onReply = onReply
         self.onEditProfile = onEditProfile
+        self.onOpenHashtag = onOpenHashtag
     }
 
     var body: some View {
@@ -63,7 +68,7 @@ struct ProfileView: View {
             }
 
             LazyVStack(spacing: 10) {
-                ForEach(viewModel.statuses) { status in
+                ForEach(viewModel.visibleStatuses) { status in
                     StatusCard(
                         status: status,
                         onOpenThread: onOpenThread,
@@ -71,14 +76,12 @@ struct ProfileView: View {
                         onReply: onReply,
                         onToggleFavourite: { viewModel.toggleFavourite(id: $0) },
                         onToggleReblog: { viewModel.toggleReblog(id: $0) },
-                        onToggleBookmark: { viewModel.toggleBookmark(id: $0) }
+                        onToggleBookmark: { viewModel.toggleBookmark(id: $0) },
+                        onOpenHashtag: onOpenHashtag,
+                        currentAccountId: appContainer.currentAccountStore.accountId,
+                        onDelete: viewModel.isOwnProfile ? { viewModel.delete($0) } : nil
                     )
                     .padding(.horizontal, 6)
-                    .contextMenu {
-                        if viewModel.isOwnProfile {
-                            Button("Delete", role: .destructive) { viewModel.delete(status) }
-                        }
-                    }
                     if status.id == viewModel.statuses.last?.id {
                         Color.clear.frame(height: 1)
                             .task { await viewModel.loadMore() }
@@ -96,5 +99,24 @@ struct ProfileView: View {
         .navigationTitle(viewModel.account?.displayName ?? "Profile")
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.load() }
+        .postModerationHost(
+            onHidePost: { id in
+                appContainer.hiddenPostsStore.add(id)
+            },
+            onBlockPost: { id in
+                appContainer.blockedPostsStore.add(id)
+            },
+            onBlockAccount: { accountId in
+                viewModel.removeStatuses(byAccount: accountId)
+                Task { try? await appContainer.friendicaAPI().block(id: accountId) }
+            },
+            onSubmitReport: { target, category, comment in
+                Task {
+                    try? await appContainer.friendicaAPI().report(
+                        accountId: target.accountId, statusIds: target.statusIds, comment: comment, category: category
+                    )
+                }
+            }
+        )
     }
 }
