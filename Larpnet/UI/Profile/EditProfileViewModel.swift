@@ -7,6 +7,9 @@ import SwiftUI
 /// display name + bio editor, locked/discoverable/bot switches, PATCHes via
 /// `update_credentials`. The bio is converted from HTML to plain text before editing (Friendica
 /// stores `note` as HTML), matching Android's use of Jsoup for the same conversion.
+///
+/// Avatar upload is a separate call (`uploadAvatarImage`, not `updateCredentials`) -- see its
+/// doc comment in `FriendicaAPIClient` for why the two can't share one request.
 @MainActor
 @Observable
 final class EditProfileViewModel {
@@ -82,8 +85,8 @@ final class EditProfileViewModel {
                 return
             }
             do {
-                let account = try await appContainer.friendicaAPI().updateCredentials(
-                    avatar: (data: jpeg, mimeType: "image/jpeg", filename: "avatar.jpg")
+                let account = try await appContainer.friendicaAPI().uploadAvatarImage(
+                    data: jpeg, mimeType: "image/jpeg", filename: "avatar.jpg"
                 )
                 // Seed the cache with the exact bytes just uploaded, keyed under whatever URL
                 // the server handed back -- stronger than evicting and hoping a re-fetch picks

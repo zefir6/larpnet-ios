@@ -81,16 +81,9 @@ final class FriendicaAPIClient: Sendable {
         return try await sendPaged(path: "api/v1/accounts/\(id)/followers", query: query)
     }
 
-    /// `avatar`, when non-nil, is sent as a multipart file part (field name `avatar`) alongside
-    /// the text fields -- confirmed against Friendica's own `UpdateCredentials.php`: it reads
-    /// `avatar` from `$_FILES`, same as every other Mastodon-API client's profile-picture flow.
-    /// The whole request is always multipart/form-data (not conditionally switched between that
-    /// and form-urlencoded depending on whether an avatar is present) -- multipart is a strict
-    /// superset for plain text fields too, and this is what real Mastodon-API clients always use
-    /// for this specific endpoint.
     func updateCredentials(
         displayName: String? = nil, note: String? = nil, locked: Bool? = nil, discoverable: Bool? = nil,
-        bot: Bool? = nil, avatar: (data: Data, mimeType: String, filename: String)? = nil
+        bot: Bool? = nil
     ) async throws -> Account {
         var fields: [String: String] = [:]
         if let displayName { fields["display_name"] = displayName }
@@ -98,13 +91,7 @@ final class FriendicaAPIClient: Sendable {
         if let locked { fields["locked"] = locked ? "true" : "false" }
         if let discoverable { fields["discoverable"] = discoverable ? "true" : "false" }
         if let bot { fields["bot"] = bot ? "true" : "false" }
-        var files: [MultipartFile] = []
-        if let avatar {
-            files.append(MultipartFile(fieldName: "avatar", filename: avatar.filename, mimeType: avatar.mimeType, data: avatar.data))
-        }
-        let request = try buildMultipartRequest(
-            path: "api/v1/accounts/update_credentials", method: "PATCH", fields: fields, files: files
-        )
+        let request = try buildFormRequest(path: "api/v1/accounts/update_credentials", fields: fields, method: "PATCH")
         let (data, _) = try await perform(request)
         do {
             return try FriendicaJSON.decoder.decode(Account.self, from: data)
@@ -416,6 +403,32 @@ final class FriendicaAPIClient: Sendable {
     }
 
     // MARK: - Media
+
+    /// Uploads the avatar via Friendica's legacy Twitter-compatible
+    /// `POST api/account/update_profile_image`, **not** the Mastodon-API
+    /// `PATCH api/v1/accounts/update_credentials` (confirmed live: that endpoint accepted the
+    /// multipart request and returned 200 with no error, but the avatar never actually changed
+    /// server-side -- didn't persist when checked via the web UI). Root cause, confirmed against
+    /// Friendica's own source: `UpdateCredentials.php`'s `avatar` field goes through Friendica's
+    /// own hand-rolled multipart-over-PATCH parser (`HTTPInputData`, needed since PHP doesn't
+    /// natively populate `$_FILES` for non-POST methods) -- and even if that parsing fails,
+    /// `Photo::uploadAvatar`'s return value is discarded uninspected by the caller, so a failure
+    /// there is silently invisible to the client. `UpdateProfileImage.php`, by contrast, reads
+    /// `$_FILES['image']` directly -- PHP's native superglobal, populated automatically by the
+    /// runtime for any real POST multipart/form-data request, no custom parser involved at all --
+    /// and it actually throws a real error (`InternalServerErrorException`) if the upload fails,
+    /// rather than silently no-op'ing.
+    ///
+    /// Returns a legacy Twitter-shaped user object, not a Mastodon `Account`, so this re-fetches
+    /// via `verifyCredentials()` afterward for a clean typed result -- the same
+    /// upload-then-refetch shape `postStatusWithACL` already uses for its own legacy-endpoint
+    /// response.
+    func uploadAvatarImage(data: Data, mimeType: String, filename: String) async throws -> Account {
+        let files = [MultipartFile(fieldName: "image", filename: filename, mimeType: mimeType, data: data)]
+        let request = try buildMultipartRequest(path: "api/account/update_profile_image", files: files)
+        _ = try await perform(request)
+        return try await verifyCredentials()
+    }
 
     func uploadMedia(data: Data, mimeType: String, filename: String, description: String? = nil) async throws -> MediaAttachment {
         var fields: [String: String] = [:]
