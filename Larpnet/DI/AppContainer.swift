@@ -12,7 +12,7 @@ import Foundation
 final class AppContainer: @unchecked Sendable {
     let tokenStore = TokenStore()
     lazy var recentTagsStore = RecentTagsStore(tokenStore: tokenStore)
-    lazy var bottomNavOrderStore = BottomNavOrderStore(tokenStore: tokenStore)
+    lazy var navigationLayoutStore = NavigationLayoutStore(tokenStore: tokenStore)
     lazy var hiddenPostsStore = LocalPostFilterStore(tokenStore: tokenStore, key: "hidden_post_ids")
     lazy var blockedPostsStore = LocalPostFilterStore(tokenStore: tokenStore, key: "blocked_post_ids")
     lazy var followedThreadsStore = FollowedThreadsStore(tokenStore: tokenStore)

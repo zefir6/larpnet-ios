@@ -43,7 +43,7 @@ struct EditProfileView: View {
             }
             .onChange(of: avatarPickerItem) { _, newValue in
                 guard let newValue else { return }
-                viewModel.uploadAvatar(newValue)
+                viewModel.stageAvatarForCropping(newValue)
                 avatarPickerItem = nil
             }
 
@@ -83,5 +83,19 @@ struct EditProfileView: View {
             if viewModel.isLoading { ProgressView() }
         }
         .task { await viewModel.load() }
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.imageToCrop != nil },
+                set: { if !$0 { viewModel.cancelCropping() } }
+            )
+        ) {
+            if let imageToCrop = viewModel.imageToCrop {
+                AvatarCropView(
+                    image: imageToCrop,
+                    onCancel: { viewModel.cancelCropping() },
+                    onCrop: { viewModel.uploadAvatar($0) }
+                )
+            }
+        }
     }
 }

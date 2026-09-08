@@ -30,6 +30,15 @@ final class ImageLoader: @unchecked Sendable {
         cache.setObject(image, forKey: url as NSURL)
         return image
     }
+
+    /// Drops one cached entry, forcing the next `load(_:)` for this exact URL to hit the network
+    /// again -- needed after an avatar upload, since it's unconfirmed whether Friendica changes
+    /// the self-account's avatar URL string on update the same way it does for contact avatars
+    /// (which carry a `?ts=` cache-busting query param). Correct to call regardless of whether
+    /// the URL actually changed.
+    func evict(_ url: URL) {
+        cache.removeObject(forKey: url as NSURL)
+    }
 }
 
 struct RemoteImage: View {

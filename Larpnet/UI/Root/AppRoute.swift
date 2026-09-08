@@ -20,6 +20,11 @@ enum AppRoute: Hashable {
     case hashtag(String)
     case albums
     case album(String)
+    /// Pushed when a destination is picked from the top-left menu instead of being the current
+    /// tab's own root -- reuses `AppDestination` directly rather than one near-duplicate
+    /// `AppRoute` case per destination (`RootView`'s shared `destinationContent(for:path:)`
+    /// builds the exact same content either way).
+    case destination(AppDestination)
 }
 
 /// Compose is presented as a `.sheet`, not a pushed route -- closer to iOS convention for a

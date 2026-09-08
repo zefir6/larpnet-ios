@@ -18,10 +18,13 @@ final class EditProfileViewModel {
     private(set) var avatarURL: String = ""
     private(set) var isLoading = false
     private(set) var isSaving = false
-    /// Avatar upload happens immediately on picking, separate from `save()`'s text-field PATCH --
+    /// Avatar upload happens immediately on cropping, separate from `save()`'s text-field PATCH --
     /// same "commits right away" UX as changing a photo in most apps, rather than bundling it
     /// into the deferred "Save" action.
     private(set) var isUploadingAvatar = false
+    /// Non-nil drives `AvatarCropView`'s sheet presentation -- set once a picked photo has been
+    /// successfully decoded, cleared on cancel or once cropping hands back a result to upload.
+    private(set) var imageToCrop: UIImage?
     var errorMessage: String?
 
     private let appContainer: AppContainer
@@ -46,17 +49,42 @@ final class EditProfileViewModel {
         }
     }
 
-    func uploadAvatar(_ item: PhotosPickerItem) {
+    /// Loads and decodes the picked photo, then stages it for `AvatarCropView` -- the actual
+    /// upload only happens once the user confirms a crop, via `uploadAvatar(_:)` below.
+    func stageAvatarForCropping(_ item: PhotosPickerItem) {
         Task {
             guard let data = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data),
-                  let jpeg = image.jpegData(compressionQuality: 0.85) else { return }
+                  let image = UIImage(data: data) else {
+                errorMessage = "Couldn't read that photo."
+                return
+            }
+            imageToCrop = image
+        }
+    }
+
+    func cancelCropping() {
+        imageToCrop = nil
+    }
+
+    func uploadAvatar(_ croppedImage: UIImage) {
+        imageToCrop = nil
+        Task {
             isUploadingAvatar = true
+            errorMessage = nil
             defer { isUploadingAvatar = false }
+            guard let jpeg = croppedImage.jpegData(compressionQuality: 0.85) else {
+                errorMessage = "Couldn't process that photo."
+                return
+            }
             do {
+                // Evict *before* overwriting `avatarURL` -- correct whether or not the server
+                // ends up returning the same literal URL string (see `ImageLoader.evict`'s doc
+                // comment for why cache eviction alone can't be fully relied on either way).
+                let oldURL = URL(string: avatarURL)
                 let account = try await appContainer.friendicaAPI().updateCredentials(
                     avatar: (data: jpeg, mimeType: "image/jpeg", filename: "avatar.jpg")
                 )
+                if let oldURL { appContainer.imageLoader.evict(oldURL) }
                 avatarURL = account.avatar
             } catch {
                 errorMessage = String(describing: error)
