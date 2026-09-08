@@ -11,3 +11,10 @@ xcuserdata/
 
 # Local-only test account credentials -- never commit.
 .test-credentials.local
+.larpnet_testuser
+
+# Throwaway seed script with 5 test accounts' passwords hardcoded in plaintext (unlike
+# ScreenshotVariantsUITests.swift/LoginFlowUITests.swift, which correctly read credentials from
+# LARPNET_TEST_USERNAME/LARPNET_TEST_PASSWORD env vars). Confirmed never committed -- keep it
+# that way.
+LarpnetUITests/TestServerSeedUITests.swift
