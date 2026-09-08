@@ -39,10 +39,15 @@ final class MediaGridViewModel {
             let me = try await api.verifyCredentials()
             accountId = me.id
             let page = try await api.getAccountStatuses(id: me.id)
-            items = Self.flatten(page.items)
+            items = Self.dedupe(Self.flatten(page.items))
             nextMaxId = page.nextMaxId
             errorMessage = nil
         } catch {
+            // A cancelled request (this screen's `.task` gets cancelled if the view disappears
+            // mid-load, e.g. navigating away quickly) isn't a real failure worth showing --
+            // surfacing it as "network(underlying: "cancelled")" reads as a scary error for what
+            // is actually expected, routine behavior.
+            guard !Task.isCancelled else { return }
             errorMessage = String(describing: error)
         }
     }
@@ -53,9 +58,20 @@ final class MediaGridViewModel {
         defer { isLoadingMore = false }
         do {
             let page = try await appContainer.friendicaAPI().getAccountStatuses(id: accountId, maxId: maxId)
-            items.append(contentsOf: Self.flatten(page.items))
+            // Deduped against everything already loaded, not just within this page -- a media
+            // attachment's `id` doubles as `ForEach`'s row identity in `MediaGridView`, and a
+            // duplicate id there is a classic source of SwiftUI misplacing/overlapping views,
+            // regardless of how a duplicate could arise (a retried `loadMore()` after a
+            // cancelled one landing on the same `maxId`, for instance).
+            let existingIds = Set(items.map(\.id))
+            items.append(contentsOf: Self.flatten(page.items).filter { !existingIds.contains($0.id) })
             nextMaxId = page.nextMaxId
         } catch {
+            // Same rationale as `loadInitial()` -- `MediaGridView` triggers this from a
+            // `.task(id:)` on the last grid cell, which `LazyVGrid` routinely cancels when that
+            // cell scrolls back out of its virtualized viewport before the request finishes.
+            // That's normal scrolling, not a network problem worth alarming the user about.
+            guard !Task.isCancelled else { return }
             errorMessage = String(describing: error)
         }
     }
@@ -64,5 +80,12 @@ final class MediaGridViewModel {
         statuses.flatMap { status in
             (status.reblog ?? status).mediaAttachments.map { MediaGridItem(statusId: status.id, media: $0) }
         }
+    }
+
+    /// Drops any item whose id repeats earlier in the same list -- see `loadMore()`'s doc
+    /// comment for why a duplicate `ForEach` id is worth guarding against defensively.
+    private static func dedupe(_ items: [MediaGridItem]) -> [MediaGridItem] {
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 }

@@ -20,7 +20,6 @@ struct MediaGridView: View {
                     } label: {
                         RemoteImage(url: URL(string: item.media.previewUrl ?? item.media.url))
                             .aspectRatio(1, contentMode: .fill)
-                            .frame(minHeight: 100)
                             .clipped()
                     }
                     .buttonStyle(.plain)
