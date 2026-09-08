@@ -1,0 +1,25 @@
+{
+    "photo": [
+        {
+            "id": "910d385c-d956afb9-a42059683490ec33",
+            "media-id": 4021,
+            "created": "2026-06-01 10:00:00",
+            "edited": "2026-06-01 10:00:00",
+            "title": "",
+            "desc": "Group photo before the game",
+            "album": "Larp 2026",
+            "filename": "group.jpg",
+            "type": "image/jpeg",
+            "height": 1200,
+            "width": 1600,
+            "datasize": 245621,
+            "profile": 0,
+            "allow_cid": "",
+            "deny_cid": "",
+            "allow_gid": "",
+            "deny_gid": "",
+            "scale": 0,
+            "thumb": "https://larpnet.pl/photo/910d385c-d956afb9-a42059683490ec33-3.jpg"
+        }
+    ]
+}

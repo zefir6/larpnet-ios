@@ -1,0 +1,14 @@
+{
+    "albums": [
+        {
+            "name": "Larp 2026",
+            "created": "2026-06-01 10:00:00",
+            "count": 12
+        },
+        {
+            "name": "Costume ideas",
+            "created": "2026-05-10 09:15:00",
+            "count": "3"
+        }
+    ]
+}

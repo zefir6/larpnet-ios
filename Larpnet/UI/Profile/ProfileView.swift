@@ -8,6 +8,7 @@ struct ProfileView: View {
     let onReply: (Status) -> Void
     let onEditProfile: () -> Void
     let onOpenHashtag: (String) -> Void
+    let onOpenAlbums: () -> Void
 
     init(
         accountId: String?, appContainer: AppContainer,
@@ -15,7 +16,8 @@ struct ProfileView: View {
         onOpenProfile: @escaping (String) -> Void,
         onReply: @escaping (Status) -> Void,
         onEditProfile: @escaping () -> Void,
-        onOpenHashtag: @escaping (String) -> Void = { _ in }
+        onOpenHashtag: @escaping (String) -> Void = { _ in },
+        onOpenAlbums: @escaping () -> Void = {}
     ) {
         _viewModel = State(initialValue: ProfileViewModel(accountId: accountId, appContainer: appContainer))
         self.appContainer = appContainer
@@ -24,6 +26,7 @@ struct ProfileView: View {
         self.onReply = onReply
         self.onEditProfile = onEditProfile
         self.onOpenHashtag = onOpenHashtag
+        self.onOpenAlbums = onOpenAlbums
     }
 
     var body: some View {
@@ -48,8 +51,12 @@ struct ProfileView: View {
                     .foregroundStyle(.secondary)
 
                     if viewModel.isOwnProfile {
-                        Button("Edit Profile", action: onEditProfile)
-                            .buttonStyle(.bordered)
+                        HStack {
+                            Button("Edit Profile", action: onEditProfile)
+                                .buttonStyle(.bordered)
+                            Button("Albums", action: onOpenAlbums)
+                                .buttonStyle(.bordered)
+                        }
                     } else if let relationship = viewModel.relationship {
                         let label = relationship.following ? "Unfollow" : (relationship.requested ? "Requested" : "Follow")
                         if relationship.following || relationship.requested {

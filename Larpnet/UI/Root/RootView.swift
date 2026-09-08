@@ -132,7 +132,8 @@ struct RootView: View {
                             onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
                             onReply: { composeContext = ComposeContext(replyToId: $0.id) },
                             onEditProfile: { path.wrappedValue.append(.editProfile) },
-                            onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) }
+                            onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) },
+                            onOpenAlbums: { path.wrappedValue.append(.albums) }
                         )
                     case .editProfile:
                         EditProfileView(appContainer: appContainer, onSaved: {})
@@ -192,6 +193,13 @@ struct RootView: View {
                         )
                         .navigationTitle("#\(tag)")
                         .navigationBarTitleDisplayMode(.inline)
+                    case .albums:
+                        AlbumsView(
+                            appContainer: appContainer,
+                            onOpenAlbum: { path.wrappedValue.append(.album($0)) }
+                        )
+                    case .album(let name):
+                        AlbumDetailView(albumName: name, appContainer: appContainer)
                     }
                 }
         }
