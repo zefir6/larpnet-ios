@@ -26,9 +26,14 @@ struct AlbumsView: View {
                 }
                 .buttonStyle(.plain)
             }
-            if viewModel.albums.isEmpty, !viewModel.isLoading {
+            if viewModel.albums.isEmpty, !viewModel.isLoading, viewModel.errorMessage == nil {
                 Text("No albums yet. Create one to start uploading photos.")
                     .foregroundStyle(.secondary)
+            }
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
         .listStyle(.insetGrouped)

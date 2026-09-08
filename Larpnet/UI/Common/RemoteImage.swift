@@ -32,20 +32,40 @@ final class ImageLoader: @unchecked Sendable {
     }
 
     /// Drops one cached entry, forcing the next `load(_:)` for this exact URL to hit the network
-    /// again -- needed after an avatar upload, since it's unconfirmed whether Friendica changes
-    /// the self-account's avatar URL string on update the same way it does for contact avatars
-    /// (which carry a `?ts=` cache-busting query param). Correct to call regardless of whether
-    /// the URL actually changed.
+    /// again. Kept alongside `store(_:for:)` below for cases where there's no already-known-good
+    /// image to seed with -- just forcing a re-fetch is enough.
     func evict(_ url: URL) {
         cache.removeObject(forKey: url as NSURL)
+    }
+
+    /// Seeds the cache with an already-known-correct image for a URL -- used right after an
+    /// avatar upload, where the just-uploaded bytes themselves are the freshest possible source
+    /// of truth. This is stronger than `evict` + relying on a re-fetch: it sidesteps any
+    /// question of whether an intermediate cache (Cloudflare, in this app's case) would still
+    /// serve stale bytes for that URL even after eviction here -- `load(_:)` never has to touch
+    /// the network at all to see the update, it's already sitting in this cache.
+    func store(_ image: UIImage, for url: URL) {
+        cache.setObject(image, forKey: url as NSURL)
     }
 }
 
 struct RemoteImage: View {
     let url: URL?
     var contentMode: ContentMode = .fill
+    /// Bump this to force a fresh `loader.load(url)` call even when `url` itself hasn't
+    /// changed -- `.task(id:)` only restarts when its id actually differs, and since this view's
+    /// own `@State private var image` is a local copy taken at fetch time, a cache mutation
+    /// elsewhere (e.g. `ImageLoader.store`/`evict`) doesn't retroactively update an
+    /// already-displayed image on its own. Defaults to 0 so every other call site in the app
+    /// (which never needs this) is unaffected.
+    var refreshToken: Int = 0
     @Environment(\.imageLoader) private var loader
     @State private var image: UIImage?
+
+    private struct FetchID: Equatable {
+        let url: URL?
+        let refreshToken: Int
+    }
 
     var body: some View {
         ZStack {
@@ -57,7 +77,7 @@ struct RemoteImage: View {
                 Color.gray.opacity(0.15)
             }
         }
-        .task(id: url) {
+        .task(id: FetchID(url: url, refreshToken: refreshToken)) {
             image = nil
             guard let url else { return }
             image = await loader.load(url)

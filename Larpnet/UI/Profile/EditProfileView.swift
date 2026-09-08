@@ -19,7 +19,7 @@ struct EditProfileView: View {
                     Spacer(minLength: 0)
                     PhotosPicker(selection: $avatarPickerItem, matching: .images) {
                         ZStack {
-                            RemoteImage(url: URL(string: viewModel.avatarURL))
+                            RemoteImage(url: URL(string: viewModel.avatarURL), refreshToken: viewModel.avatarVersion)
                                 .frame(width: 88, height: 88)
                                 .clipShape(Circle())
                             if viewModel.isUploadingAvatar {

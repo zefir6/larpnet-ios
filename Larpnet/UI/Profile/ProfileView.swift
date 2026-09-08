@@ -2,13 +2,14 @@ import SwiftUI
 
 struct ProfileView: View {
     @State private var viewModel: ProfileViewModel
-    // `RemoteImage` only re-fetches when its `.task(id: url)` sees a genuinely different `URL`
-    // value -- evicting the old entry from `ImageLoader`'s cache (done in
-    // `EditProfileViewModel.uploadAvatar`) isn't enough on its own if Friendica happens to
-    // return the *same* literal avatar URL string after an upload (unconfirmed either way).
-    // Appending this token, bumped on every reappear-triggered reload below, guarantees a fresh
-    // fetch regardless of server behavior.
-    @State private var avatarCacheBustToken = 0
+    // `RemoteImage` only re-fetches when its fetch id (url + `refreshToken`) actually changes --
+    // `EditProfileViewModel.uploadAvatar` seeds `ImageLoader`'s cache with the freshly uploaded
+    // bytes directly, but if the server happens to return the *same* literal avatar URL string
+    // as before (unconfirmed either way), the URL alone wouldn't tell this screen's `RemoteImage`
+    // instance to look again. Bumping this on every reappear-triggered reload below forces it to,
+    // and since the cache is already correctly seeded by then, that's a guaranteed hit, not a
+    // network round-trip.
+    @State private var avatarRefreshToken = 0
     let appContainer: AppContainer
     let onOpenThread: (Status) -> Void
     let onOpenProfile: (String) -> Void
@@ -40,7 +41,7 @@ struct ProfileView: View {
         ScrollView {
             if let account = viewModel.account {
                 VStack(alignment: .leading, spacing: 8) {
-                    RemoteImage(url: displayedAvatarURL(for: account))
+                    RemoteImage(url: URL(string: account.avatar), refreshToken: viewModel.isOwnProfile ? avatarRefreshToken : 0)
                         .frame(width: 72, height: 72)
                         .clipShape(Circle())
                     Text(account.displayName.isEmpty ? account.username : account.displayName)
@@ -121,7 +122,7 @@ struct ProfileView: View {
         // fire redundantly alongside `.task` on first appearance (account is still nil then).
         .onAppear {
             if viewModel.account != nil {
-                avatarCacheBustToken += 1
+                avatarRefreshToken += 1
                 Task { await viewModel.load() }
             }
         }
@@ -144,18 +145,5 @@ struct ProfileView: View {
                 }
             }
         )
-    }
-
-    /// Only own-profile reloads bump `avatarCacheBustToken`, and only own-profile pictures can
-    /// have just been changed by this user -- another account's avatar is never cache-busted.
-    private func displayedAvatarURL(for account: Account) -> URL? {
-        guard viewModel.isOwnProfile, avatarCacheBustToken > 0,
-              var components = URLComponents(string: account.avatar) else {
-            return URL(string: account.avatar)
-        }
-        var items = components.queryItems ?? []
-        items.append(URLQueryItem(name: "_cb", value: String(avatarCacheBustToken)))
-        components.queryItems = items
-        return components.url
     }
 }

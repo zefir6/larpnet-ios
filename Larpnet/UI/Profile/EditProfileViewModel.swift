@@ -16,6 +16,11 @@ final class EditProfileViewModel {
     var discoverable: Bool = false
     var bot: Bool = false
     private(set) var avatarURL: String = ""
+    /// Bumped on every successful upload -- fed to `RemoteImage`'s `refreshToken` so this
+    /// screen's own small preview re-fetches even if `avatarURL`'s string happens to be
+    /// unchanged (its `.task(id:)` otherwise has no way to know a cache mutation happened
+    /// elsewhere).
+    private(set) var avatarVersion = 0
     private(set) var isLoading = false
     private(set) var isSaving = false
     /// Avatar upload happens immediately on cropping, separate from `save()`'s text-field PATCH --
@@ -77,15 +82,21 @@ final class EditProfileViewModel {
                 return
             }
             do {
-                // Evict *before* overwriting `avatarURL` -- correct whether or not the server
-                // ends up returning the same literal URL string (see `ImageLoader.evict`'s doc
-                // comment for why cache eviction alone can't be fully relied on either way).
-                let oldURL = URL(string: avatarURL)
                 let account = try await appContainer.friendicaAPI().updateCredentials(
                     avatar: (data: jpeg, mimeType: "image/jpeg", filename: "avatar.jpg")
                 )
-                if let oldURL { appContainer.imageLoader.evict(oldURL) }
+                // Seed the cache with the exact bytes just uploaded, keyed under whatever URL
+                // the server handed back -- stronger than evicting and hoping a re-fetch picks
+                // up fresh bytes, since it sidesteps any question of whether Cloudflare (fronting
+                // larpnet.pl) would still serve a stale cached response for that URL path even
+                // right after an eviction here. Every screen showing this account's avatar
+                // (`ProfileView` via its own reload) ends up requesting this exact URL, so this
+                // is a guaranteed hit, not a network round-trip, once they do.
+                if let newURL = URL(string: account.avatar) {
+                    appContainer.imageLoader.store(croppedImage, for: newURL)
+                }
                 avatarURL = account.avatar
+                avatarVersion += 1
             } catch {
                 errorMessage = String(describing: error)
             }

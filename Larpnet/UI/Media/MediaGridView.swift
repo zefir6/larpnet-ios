@@ -20,12 +20,25 @@ struct MediaGridView: View {
                     } label: {
                         RemoteImage(url: URL(string: item.media.previewUrl ?? item.media.url))
                             .aspectRatio(1, contentMode: .fill)
+                            .frame(minHeight: 100)
                             .clipped()
                     }
                     .buttonStyle(.plain)
-                    .onAppear {
+                    // `.task(id:)`, not `.onAppear` -- runs exactly once when this cell is
+                    // first lazily instantiated by `LazyVGrid` (i.e. as it approaches the
+                    // viewport), not every time it merely scrolls in/out during fast or bouncy
+                    // scrolling the way `.onAppear` would re-fire. Attached to the cell itself
+                    // (rather than a separate sentinel placed after the grid) because a sentinel
+                    // outside `LazyVGrid` sits in the plain, non-lazy `ScrollView` around it and
+                    // would run immediately on screen load instead of waiting for scroll --
+                    // being *inside* the lazy container is what makes the "wait until near the
+                    // bottom" behavior work at all. Matches the intent of the
+                    // `Color.clear.task { }` sentinel `TimelineView`/`ProfileView` use inside
+                    // their own `LazyVStack`s, adapted for a 2D grid where an extra sentinel
+                    // cell would disrupt column layout.
+                    .task(id: item.id) {
                         if item.id == viewModel.items.last?.id {
-                            Task { await viewModel.loadMore() }
+                            await viewModel.loadMore()
                         }
                     }
                 }
