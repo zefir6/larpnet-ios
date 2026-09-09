@@ -2,12 +2,19 @@
 
 ## Versioning
 
-`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml` (lines ~72-73) must stay in sync
-with the App Store release. When starting work on a new feature/release after a version has
-shipped, bump `MARKETING_VERSION` to the next minor version past what's live on the App Store
-(e.g. App Store is on 1.0 -> next branch is 1.1) and increment `CURRENT_PROJECT_VERSION` (the
-build number) by 1. Run `xcodegen generate` afterward to regenerate the gitignored
-`Larpnet.xcodeproj` with the new values.
+`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml` (lines ~80-81) must stay in sync
+with the App Store release. On the `test` branch (Xcode Cloud's internal-testing track), bump
+*both* on every push, not just once a version ships: increment `MARKETING_VERSION`'s minor
+component (e.g. 1.1 -> 1.2) and `CURRENT_PROJECT_VERSION` (the build number) by 1 for each change
+merged/pushed to `test`, so every internal build carries its own distinct version. Run
+`xcodegen generate` afterward to regenerate the gitignored `Larpnet.xcodeproj` with the new
+values.
+
+When preparing an actual App Store submission off `main` (not an internal test build), use the
+release cadence instead: after a version has shipped, bump `MARKETING_VERSION` to the next minor
+version past what's live on the App Store (e.g. App Store is on 1.0 -> next branch is 1.1) and
+increment `CURRENT_PROJECT_VERSION` by 1 -- same mechanics as above, just tied to actual shipped
+releases rather than every internal push.
 
 ## Test account credentials
 
