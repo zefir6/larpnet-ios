@@ -81,6 +81,27 @@ final class FriendicaAPIClient: Sendable {
         return try await sendPaged(path: "api/v1/accounts/\(id)/followers", query: query)
     }
 
+    func following(id: String, maxId: String? = nil) async throws -> Page<Account> {
+        var query: [URLQueryItem] = []
+        if let maxId { query.append(URLQueryItem(name: "max_id", value: maxId)) }
+        return try await sendPaged(path: "api/v1/accounts/\(id)/following", query: query)
+    }
+
+    /// Pending incoming follow requests -- people who want to follow this (locked) account.
+    /// Friendica implements the standard Mastodon `follow_requests` endpoints
+    /// (`src/Module/Api/Mastodon/FollowRequests.php`); returns plain `Account`s, Link-header paged.
+    func followRequests(maxId: String? = nil) async throws -> Page<Account> {
+        var query: [URLQueryItem] = []
+        if let maxId { query.append(URLQueryItem(name: "max_id", value: maxId)) }
+        return try await sendPaged(path: "api/v1/follow_requests", query: query)
+    }
+
+    /// `action` is one of "authorize" | "ignore" | "reject" (mirrors `report(...)`'s `category`
+    /// convention -- a plain string, not an enum, matching Friendica's route param directly).
+    func respondToFollowRequest(accountId: String, action: String) async throws -> Relationship {
+        try await send(path: "api/v1/follow_requests/\(accountId)/\(action)", method: "POST")
+    }
+
     func updateCredentials(
         displayName: String? = nil, note: String? = nil, locked: Bool? = nil, discoverable: Bool? = nil,
         bot: Bool? = nil
