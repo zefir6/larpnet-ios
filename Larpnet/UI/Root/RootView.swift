@@ -232,6 +232,10 @@ struct RootView: View {
                             appContainer: appContainer,
                             onOpenThread: { path.wrappedValue.append(.thread(statusId: $0)) }
                         )
+                    case .deleteAccount:
+                        DeleteAccountView(appContainer: appContainer)
+                    case .termsOfUse:
+                        TermsOfUseView()
                     case .hashtag(let tag):
                         TimelineView(
                             kind: .hashtag(tag), appContainer: appContainer,

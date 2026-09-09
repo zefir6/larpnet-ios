@@ -25,6 +25,8 @@ enum AppRoute: Hashable {
     /// `AppRoute` case per destination (`RootView`'s shared `destinationContent(for:path:)`
     /// builds the exact same content either way).
     case destination(AppDestination)
+    case deleteAccount
+    case termsOfUse
 }
 
 /// Compose is presented as a `.sheet`, not a pushed route -- closer to iOS convention for a

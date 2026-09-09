@@ -114,6 +114,15 @@ final class TokenStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "push_enabled") }
     }
 
+    /// Whether the current session has agreed to `TermsGateView`'s terms. Cleared by `clear()`
+    /// -- shown once per login, not once per device: logging out and back in (possibly as a
+    /// different account) goes through the gate again, same as Apple's guideline 1.2 wants it
+    /// presented before *each* registration/login, not just the device's first ever one.
+    var hasAcceptedTerms: Bool {
+        get { defaults.bool(forKey: "has_accepted_terms") }
+        set { defaults.set(newValue, forKey: "has_accepted_terms") }
+    }
+
     /// The bare domain (e.g. "larpnet.pl", not a full URL) the login screen prefills and
     /// Settings' "Server" control edits. Not a secret, so `UserDefaults`, not Keychain --
     /// and deliberately *not* cleared by `clear()`: it's what the *next* login uses, so wiping
@@ -174,12 +183,14 @@ final class TokenStore: @unchecked Sendable {
 
     /// Clears the access token and cached app registration (client id/secret), but leaves
     /// `pushEnabled` alone -- same split as Android's `clear()`. Also clears `currentAccountId`
-    /// -- session identity, not a UI preference like the properties above.
+    /// -- session identity, not a UI preference like the properties above -- and
+    /// `hasAcceptedTerms`, so `TermsGateView` is shown again before the next login.
     func clear() {
         instanceBaseURL = nil
         clientId = nil
         clientSecret = nil
         accessToken = nil
         currentAccountId = nil
+        hasAcceptedTerms = false
     }
 }
