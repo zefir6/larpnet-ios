@@ -4,11 +4,13 @@ import SwiftUI
 struct LarpnetApp: App {
     @State private var appContainer: AppContainer
     @State private var isLoggedIn: Bool
+    @State private var hasAcceptedTerms: Bool
 
     init() {
         let container = AppContainer()
         _appContainer = State(initialValue: container)
         _isLoggedIn = State(initialValue: container.tokenStore.isLoggedIn)
+        _hasAcceptedTerms = State(initialValue: container.tokenStore.hasAcceptedTerms)
         // Registration must happen unconditionally and before the app finishes launching --
         // BGTaskScheduler requires it during `application(_:didFinishLaunchingWithOptions:)`-
         // equivalent startup, regardless of whether the user is logged in yet. Requesting
@@ -22,6 +24,11 @@ struct LarpnetApp: App {
             Group {
                 if isLoggedIn {
                     RootView(appContainer: appContainer, onLoggedOut: { isLoggedIn = false })
+                } else if !hasAcceptedTerms {
+                    TermsGateView(onAccept: {
+                        appContainer.tokenStore.hasAcceptedTerms = true
+                        hasAcceptedTerms = true
+                    })
                 } else {
                     LoginView(appContainer: appContainer, onLoggedIn: {
                         isLoggedIn = true

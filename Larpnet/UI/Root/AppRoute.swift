@@ -18,6 +18,8 @@ enum AppRoute: Hashable {
     case blockedPosts
     case followedThreads
     case hashtag(String)
+    case deleteAccount
+    case termsOfUse
 }
 
 /// Compose is presented as a `.sheet`, not a pushed route -- closer to iOS convention for a

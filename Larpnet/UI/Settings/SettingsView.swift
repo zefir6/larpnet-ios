@@ -107,8 +107,17 @@ struct SettingsView: View {
             }
 
             Section("Safety") {
+                NavigationLink(value: AppRoute.termsOfUse) {
+                    Text("Terms of Use")
+                }
                 Link("Report abuse", destination: viewModel.reportAbuseURL)
                 Link("Child safety standards", destination: viewModel.childSafetyStandardsURL)
+            }
+
+            Section {
+                NavigationLink(value: AppRoute.deleteAccount) {
+                    Text("Delete Account").foregroundStyle(.red)
+                }
             }
 
             if let errorMessage = viewModel.errorMessage {
