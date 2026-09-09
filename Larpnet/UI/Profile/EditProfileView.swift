@@ -13,16 +13,26 @@ struct EditProfileView: View {
     }
 
     var body: some View {
+        // Read once here (`body` is `@MainActor`) rather than inline inside `PhotosPicker`'s
+        // `label` closure below -- that closure comes from a PhotosUI/SwiftUI cross-import
+        // overlay that isn't annotated `@MainActor` for Swift 6 strict concurrency, so touching
+        // `viewModel` (itself `@MainActor`) directly inside it trips "can not be referenced from
+        // a nonisolated context". These are plain value types, so hoisting them changes nothing
+        // behaviorally -- `body` already re-runs on every relevant state change regardless.
+        let avatarURL = viewModel.avatarURL
+        let avatarVersion = viewModel.avatarVersion
+        let isUploadingAvatar = viewModel.isUploadingAvatar
+
         Form {
             Section {
                 HStack {
                     Spacer(minLength: 0)
                     PhotosPicker(selection: $avatarPickerItem, matching: .images) {
                         ZStack {
-                            RemoteImage(url: URL(string: viewModel.avatarURL), refreshToken: viewModel.avatarVersion)
+                            RemoteImage(url: URL(string: avatarURL), refreshToken: avatarVersion)
                                 .frame(width: 88, height: 88)
                                 .clipShape(Circle())
-                            if viewModel.isUploadingAvatar {
+                            if isUploadingAvatar {
                                 Circle().fill(.black.opacity(0.4)).frame(width: 88, height: 88)
                                 ProgressView().tint(.white)
                             } else {

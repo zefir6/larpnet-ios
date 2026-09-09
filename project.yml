@@ -57,6 +57,11 @@ targets:
         # at build time, for both local and Xcode Cloud archive builds.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # The app only uses standard HTTPS/TLS (Friendica API calls, OAuth, image loads) -- no
+        # additional/proprietary encryption -- so this is exempt from export compliance
+        # documentation. Declaring it here skips the "Does your app use encryption?" prompt on
+        # every App Store Connect upload.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -77,8 +82,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: pl.larpnet.ios
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.3"
-        CURRENT_PROJECT_VERSION: "5"
+        MARKETING_VERSION: "1.4"
+        CURRENT_PROJECT_VERSION: "6"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_EMIT_LOC_STRINGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
