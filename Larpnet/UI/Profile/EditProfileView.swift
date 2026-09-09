@@ -47,6 +47,15 @@ struct EditProfileView: View {
                 avatarPickerItem = nil
             }
 
+            // Right under the avatar, not at the bottom of the form -- an avatar-upload error
+            // needs to be visible without scrolling past Display name/Bio/Privacy first (a real
+            // upload failure was confirmed live to go unnoticed here before this moved up).
+            if let errorMessage = viewModel.errorMessage {
+                Section {
+                    Text(errorMessage).foregroundStyle(.red)
+                }
+            }
+
             Section("Display name") {
                 TextField("Display name", text: $viewModel.displayName)
             }
@@ -57,11 +66,6 @@ struct EditProfileView: View {
                 Toggle("Manually approve followers", isOn: $viewModel.locked)
                 Toggle("Discoverable", isOn: $viewModel.discoverable)
                 Toggle("Bot account", isOn: $viewModel.bot)
-            }
-            if let errorMessage = viewModel.errorMessage {
-                Section {
-                    Text(errorMessage).foregroundStyle(.red)
-                }
             }
         }
         .navigationTitle("Edit Profile")
@@ -76,7 +80,7 @@ struct EditProfileView: View {
                         }
                     }
                 }
-                .disabled(viewModel.isSaving)
+                .disabled(viewModel.isSaving || viewModel.isUploadingAvatar)
             }
         }
         .overlay {

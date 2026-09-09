@@ -7,6 +7,9 @@ import SwiftUI
 /// display name + bio editor, locked/discoverable/bot switches, PATCHes via
 /// `update_credentials`. The bio is converted from HTML to plain text before editing (Friendica
 /// stores `note` as HTML), matching Android's use of Jsoup for the same conversion.
+///
+/// Avatar upload is a separate call (`uploadAvatarImage`, not `updateCredentials`) -- see its
+/// doc comment in `FriendicaAPIClient` for why the two can't share one request.
 @MainActor
 @Observable
 final class EditProfileViewModel {
@@ -81,20 +84,39 @@ final class EditProfileViewModel {
                 errorMessage = "Couldn't process that photo."
                 return
             }
+            // Captured *before* the upload call, bypassing every cache (this loader's and
+            // Cloudflare's), so it reflects what the server was actually serving beforehand --
+            // the only way to tell a real change from Friendica silently no-op'ing apart. Byte
+            // comparison, not URL comparison: a live fixture (`account_partial.json`) shows the
+            // self-avatar URL is a stable path with no cache-busting token, so the URL string
+            // would stay identical even on a genuine successful upload.
+            let previousURL = URL(string: avatarURL)
+            let previousBytes = previousURL != nil ? await appContainer.imageLoader.fetchFresh(previousURL!) : nil
             do {
-                let account = try await appContainer.friendicaAPI().updateCredentials(
-                    avatar: (data: jpeg, mimeType: "image/jpeg", filename: "avatar.jpg")
+                let account = try await appContainer.friendicaAPI().uploadAvatarImage(
+                    data: jpeg, mimeType: "image/jpeg", filename: "avatar.jpg"
                 )
-                // Seed the cache with the exact bytes just uploaded, keyed under whatever URL
-                // the server handed back -- stronger than evicting and hoping a re-fetch picks
-                // up fresh bytes, since it sidesteps any question of whether Cloudflare (fronting
-                // larpnet.pl) would still serve a stale cached response for that URL path even
-                // right after an eviction here. Every screen showing this account's avatar
-                // (`ProfileView` via its own reload) ends up requesting this exact URL, so this
-                // is a guaranteed hit, not a network round-trip, once they do.
-                if let newURL = URL(string: account.avatar) {
-                    appContainer.imageLoader.store(croppedImage, for: newURL)
+                guard let newURL = URL(string: account.avatar) else {
+                    errorMessage = "Server returned an invalid avatar URL."
+                    return
                 }
+                if let previousBytes {
+                    guard let freshBytes = await appContainer.imageLoader.fetchFresh(newURL) else {
+                        errorMessage = "Uploaded, but couldn't verify the change went through -- check your profile in a bit."
+                        return
+                    }
+                    guard freshBytes != previousBytes else {
+                        errorMessage =
+                            "The server accepted the upload but didn't actually change your avatar -- this looks like a server-side bug, not something wrong on your end. Your photo was not saved."
+                        return
+                    }
+                }
+                // Only seed the cache -- with the exact bytes just uploaded, sidestepping any
+                // further Cloudflare-staleness question for screens that display this URL right
+                // away -- once the byte-diff above has actually confirmed the server changed
+                // something. Seeding unconditionally is what let this whole bug hide: the app
+                // would show the new photo locally even when nothing changed server-side.
+                appContainer.imageLoader.store(croppedImage, for: newURL)
                 avatarURL = account.avatar
                 avatarVersion += 1
             } catch {

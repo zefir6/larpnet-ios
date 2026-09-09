@@ -64,6 +64,28 @@ final class ImageLoader: @unchecked Sendable {
     func store(_ image: UIImage, for url: URL) {
         cache.setObject(image, forKey: url as NSURL)
     }
+
+    /// Bypasses this loader's own cache *and* any intermediate cache (Cloudflare fronts
+    /// larpnet.pl) by appending a random query param, guaranteeing a true end-to-end cache
+    /// miss, plus `.reloadIgnoringLocalAndRemoteCacheData` so `URLSession`'s own cache can't
+    /// intercept it either. Exists solely to verify an avatar upload actually changed what the
+    /// server serves -- `load(_:)`'s whole point is caching, which is exactly what must be
+    /// defeated here. Returns raw bytes, not a decoded `UIImage`, since the caller only needs
+    /// to diff two fetches for byte-equality, not display anything.
+    func fetchFresh(_ url: URL) async -> Data? {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        comps.queryItems = (comps.queryItems ?? []) + [URLQueryItem(name: "_cb", value: UUID().uuidString)]
+        guard let bustedURL = comps.url else { return nil }
+        var request = URLRequest(url: bustedURL, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+        if let token = tokenStore?.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return nil
+        }
+        return data
+    }
 }
 
 struct RemoteImage: View {
