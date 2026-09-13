@@ -57,6 +57,20 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(status.account.username, "", "nested Account also only guarantees id")
     }
 
+    func testDecodesStatusWithPoll() throws {
+        let data = try loadFixture("status_with_poll")
+        let status = try FriendicaJSON.decoder.decode(Status.self, from: data)
+        let poll = try XCTUnwrap(status.poll)
+        XCTAssertEqual(poll.id, "77")
+        XCTAssertFalse(poll.multiple)
+        XCTAssertFalse(poll.expired)
+        XCTAssertEqual(poll.votesCount, 3)
+        XCTAssertTrue(poll.voted, "voted must decode true when this instance has a local vote on record")
+        XCTAssertEqual(poll.ownVotes, [1], "own_votes must decode -- local-only poll voting, see Poll's doc comment")
+        XCTAssertEqual(poll.options.map(\.title), ["Pierogi", "Bigos"])
+        XCTAssertEqual(poll.options.map(\.votesCount), [1, 2])
+    }
+
     func testDecodesPartialAccount() throws {
         let data = try loadFixture("account_partial")
         let account = try FriendicaJSON.decoder.decode(Account.self, from: data)

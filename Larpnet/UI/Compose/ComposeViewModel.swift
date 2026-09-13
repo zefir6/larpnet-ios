@@ -43,6 +43,22 @@ final class ComposeViewModel {
     private var followersReachedEnd = false
     private var selfAccountId: String?
 
+    // Local-only poll creation (see `Poll`'s doc comment) -- mutually exclusive with media
+    // attachments and unavailable for custom-audience posts, both mirroring server-side
+    // restrictions (`postStatusWithACL` has no poll support). Direct port of Android's
+    // `ComposeViewModel.kt` poll additions.
+    var isPollEnabled = false
+    var pollOptions: [String] = ["", ""]
+    var pollMultiple = false
+    var pollExpiresInSeconds = ComposeViewModel.defaultPollExpiresInSeconds
+
+    /// Mirrors the server's `Model\Post\Question` limits (friendica-larpnet).
+    static let minPollOptions = 2
+    static let maxPollOptions = 4
+    static let defaultPollExpiresInSeconds = 86400
+    /// Seconds-from-now choices offered for poll duration.
+    static let pollExpiryChoices = [300, 1800, 3600, 21600, 86400, 259200, 604800, 2629746]
+
     let replyToId: String?
     private let appContainer: AppContainer
 
@@ -66,10 +82,30 @@ final class ComposeViewModel {
     }
 
     var canPublish: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isPublishing
-            && !pendingMedia.contains { $0.isUploading }
+        guard !isPublishing, !pendingMedia.contains(where: { $0.isUploading }) else { return false }
+        if isPollEnabled {
+            return validPollOptions.count >= Self.minPollOptions && pendingMedia.isEmpty && !isCustomAudience
+        }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (!isCustomAudience || !(selectedCircleIds.isEmpty && selectedAccountIds.isEmpty))
+    }
+
+    private var validPollOptions: [String] {
+        pollOptions.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    func togglePoll() {
+        isPollEnabled.toggle()
+    }
+
+    func addPollOption() {
+        guard pollOptions.count < Self.maxPollOptions else { return }
+        pollOptions.append("")
+    }
+
+    func removePollOption(at index: Int) {
+        guard pollOptions.count > Self.minPollOptions, pollOptions.indices.contains(index) else { return }
+        pollOptions.remove(at: index)
     }
 
     /// Fetches circles + the first page of followers for the audience picker, once, the first
@@ -220,7 +256,10 @@ final class ComposeViewModel {
                     visibility: visibility,
                     spoilerText: isSpoilerEnabled ? spoilerText : nil,
                     sensitive: sensitive,
-                    mediaIds: pendingMedia.compactMap(\.uploadedId)
+                    mediaIds: pendingMedia.compactMap(\.uploadedId),
+                    pollOptions: isPollEnabled ? validPollOptions : [],
+                    pollMultiple: isPollEnabled ? pollMultiple : nil,
+                    pollExpiresIn: isPollEnabled ? pollExpiresInSeconds : nil
                 )
             }
             for tag in tagsToPublish { appContainer.recentTagsStore.recordUsed(tag) }
