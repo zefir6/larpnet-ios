@@ -75,7 +75,16 @@ struct ComposeView: View {
                     }
                 }
 
-                if !viewModel.isCustomAudience {
+                if !viewModel.isCustomAudience && viewModel.pendingMedia.isEmpty {
+                    Section {
+                        Toggle("Add poll", isOn: $viewModel.isPollEnabled)
+                        if viewModel.isPollEnabled {
+                            PollComposeSection(viewModel: viewModel)
+                        }
+                    }
+                }
+
+                if !viewModel.isCustomAudience && !viewModel.isPollEnabled {
                     Section("Media") {
                         PhotosPicker("Add photo", selection: $photoPickerItem, matching: .images)
                         if !viewModel.pendingMedia.isEmpty {
@@ -102,7 +111,7 @@ struct ComposeView: View {
                             }
                         }
                     }
-                } else {
+                } else if viewModel.isCustomAudience {
                     Section {
                         Text("Photos aren't supported on custom-audience posts yet.")
                             .font(.caption)

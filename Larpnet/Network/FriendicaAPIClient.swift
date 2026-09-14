@@ -259,14 +259,20 @@ final class FriendicaAPIClient: Sendable {
 
     func postStatus(
         status: String, inReplyToId: String? = nil, visibility: String = "public",
-        spoilerText: String? = nil, sensitive: Bool? = nil, mediaIds: [String] = []
+        spoilerText: String? = nil, sensitive: Bool? = nil, mediaIds: [String] = [],
+        // Poll and media are mutually exclusive server-side; only ever send one. Local-only,
+        // see `Poll`'s doc comment.
+        pollOptions: [String] = [], pollMultiple: Bool? = nil, pollExpiresIn: Int? = nil
     ) async throws -> Status {
         var fields = ["status": status, "visibility": visibility]
         if let inReplyToId { fields["in_reply_to_id"] = inReplyToId }
         if let spoilerText { fields["spoiler_text"] = spoilerText }
         if let sensitive { fields["sensitive"] = sensitive ? "true" : "false" }
+        if let pollMultiple { fields["poll[multiple]"] = pollMultiple ? "true" : "false" }
+        if let pollExpiresIn { fields["poll[expires_in]"] = String(pollExpiresIn) }
         let request = try buildFormRequest(
-            path: "api/v1/statuses", fields: fields, arrayField: ("media_ids[]", mediaIds)
+            path: "api/v1/statuses", fields: fields,
+            arrayFields: [("media_ids[]", mediaIds), ("poll[options][]", pollOptions)]
         )
         let (data, _) = try await perform(request)
         do {
@@ -355,6 +361,25 @@ final class FriendicaAPIClient: Sendable {
 
     func unbookmark(id: String) async throws -> Status {
         try await send(path: "api/v1/statuses/\(id)/unbookmark", method: "POST")
+    }
+
+    // MARK: - Polls (local voting/creation only, not federated -- see `Poll`'s doc comment)
+
+    func getPoll(id: String) async throws -> Poll {
+        try await send(path: "api/v1/polls/\(id)")
+    }
+
+    func votePoll(id: String, choices: [Int]) async throws -> Poll {
+        let request = try buildFormRequest(
+            path: "api/v1/polls/\(id)/votes", fields: [:],
+            arrayField: ("choices[]", choices.map(String.init))
+        )
+        let (data, _) = try await perform(request)
+        do {
+            return try FriendicaJSON.decoder.decode(Poll.self, from: data)
+        } catch {
+            throw NetworkError.parse(underlying: String(describing: error))
+        }
     }
 
     // MARK: - Conversations (DMs)

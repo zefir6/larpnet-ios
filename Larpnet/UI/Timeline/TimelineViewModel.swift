@@ -172,6 +172,18 @@ final class TimelineViewModel {
         }
     }
 
+    /// Local-only (see `Poll`'s doc comment). Waits for the server's tally rather than
+    /// optimistically updating, since vote percentages depend on every option's count, not
+    /// just the chosen one.
+    func votePoll(statusId: String, choices: [Int]) {
+        guard let pollId = currentStatus(id: statusId)?.poll?.id else { return }
+        Task {
+            let api = try? appContainer.friendicaAPI()
+            guard let poll = try? await api?.votePoll(id: pollId, choices: choices) else { return }
+            apply(id: statusId) { $0.poll = poll }
+        }
+    }
+
     /// `id` may be either a top-level entry's own id or, for a boost, its wrapped `reblog.id` --
     /// `statuses` holds top-level entries whose id differs from a boost's wrapped status.
     private func currentStatus(id: String) -> Status? {

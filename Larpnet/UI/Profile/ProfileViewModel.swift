@@ -117,6 +117,17 @@ final class ProfileViewModel {
         }
     }
 
+    /// Local-only (see `Poll`'s doc comment). Waits for the server's tally rather than
+    /// optimistically updating -- see `TimelineViewModel.votePoll`'s doc comment.
+    func votePoll(statusId: String, choices: [Int]) {
+        guard let pollId = currentStatus(id: statusId)?.poll?.id else { return }
+        Task {
+            let api = try? appContainer.friendicaAPI()
+            guard let poll = try? await api?.votePoll(id: pollId, choices: choices) else { return }
+            apply(id: statusId) { $0.poll = poll }
+        }
+    }
+
     func delete(_ status: Status) {
         statuses.removeAll { $0.id == status.id }
         Task { try? await appContainer.friendicaAPI().deleteStatus(id: status.id) }

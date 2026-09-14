@@ -42,6 +42,7 @@ struct TimelineView: View {
                         onToggleFavourite: { viewModel.toggleFavourite(id: $0) },
                         onToggleReblog: { viewModel.toggleReblog(id: $0) },
                         onToggleBookmark: { viewModel.toggleBookmark(id: $0) },
+                        onVotePoll: { statusId, choices in viewModel.votePoll(statusId: statusId, choices: choices) },
                         onOpenHashtag: onOpenHashtag,
                         currentAccountId: appContainer.currentAccountStore.accountId
                     )
