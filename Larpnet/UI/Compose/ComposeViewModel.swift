@@ -54,7 +54,7 @@ final class ComposeViewModel {
 
     /// Mirrors the server's `Model\Post\Question` limits (friendica-larpnet).
     static let minPollOptions = 2
-    static let maxPollOptions = 4
+    static let maxPollOptions = 20
     static let defaultPollExpiresInSeconds = 86400
     /// Seconds-from-now choices offered for poll duration.
     static let pollExpiryChoices = [300, 1800, 3600, 21600, 86400, 259200, 604800, 2629746]
