@@ -31,6 +31,9 @@ struct StatusCard: View {
     var onToggleFavourite: (String) -> Void = { _ in }
     var onToggleReblog: (String) -> Void = { _ in }
     var onToggleBookmark: (String) -> Void = { _ in }
+    /// First param is the status's own id (matching the toggle callbacks above), not the poll's
+    /// id -- the view model resolves the current poll id itself, same staleness rationale.
+    var onVotePoll: (String, [Int]) -> Void = { _, _ in }
     /// Tag chip tapped, or an in-body hashtag link matching one of `status.tags` intercepted via
     /// `openURL` below -- both hand back the bare tag name (no leading `#`).
     var onOpenHashtag: (String) -> Void = { _ in }
@@ -133,6 +136,10 @@ struct StatusCard: View {
                         }
                     }
                 }
+            }
+
+            if let poll = displayed.poll {
+                PollView(poll: poll) { choices in onVotePoll(displayed.id, choices) }
             }
 
             HStack(spacing: 20) {

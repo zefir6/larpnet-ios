@@ -73,4 +73,31 @@ final class NotificationsViewModel {
         notifications = []
         Task { try? await appContainer.friendicaAPI().clearNotifications() }
     }
+
+    func acceptFollowRequest(_ notification: LarpnetNotification) {
+        notifications.removeAll { $0.id == notification.id }
+        let account = notification.account
+        Task {
+            guard let api = try? appContainer.friendicaAPI() else { return }
+            try? await FollowRequestActions.accept(account, api: api)
+        }
+    }
+
+    func acceptAndFollowBackFollowRequest(_ notification: LarpnetNotification) {
+        notifications.removeAll { $0.id == notification.id }
+        let account = notification.account
+        Task {
+            guard let api = try? appContainer.friendicaAPI() else { return }
+            try? await FollowRequestActions.acceptAndFollowBack(account, api: api)
+        }
+    }
+
+    func declineFollowRequest(_ notification: LarpnetNotification) {
+        notifications.removeAll { $0.id == notification.id }
+        let account = notification.account
+        Task {
+            guard let api = try? appContainer.friendicaAPI() else { return }
+            try? await FollowRequestActions.decline(account, api: api)
+        }
+    }
 }

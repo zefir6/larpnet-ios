@@ -2,35 +2,46 @@ import SwiftUI
 
 struct NotificationsView: View {
     @State private var viewModel: NotificationsViewModel
+    let onOpenProfile: (String) -> Void
 
-    init(appContainer: AppContainer) {
+    init(appContainer: AppContainer, onOpenProfile: @escaping (String) -> Void) {
         _viewModel = State(initialValue: NotificationsViewModel(appContainer: appContainer))
+        self.onOpenProfile = onOpenProfile
     }
 
     var body: some View {
         List {
             ForEach(viewModel.notifications) { notification in
-                // `NavigationLink(value:)`, not a plain `Button` wrapping the row -- a `List`
-                // row's own selection gesture unreliably swallows a nested `Button`'s tap (the
-                // exact bug already found and fixed this way for the Settings profile row);
-                // `NavigationLink` is the mechanism that actually pushes reliably from inside a
-                // `List` row.
-                NavigationLink(value: route(for: notification)) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        AccountRow(account: notification.account, subtitle: description(for: notification))
-                        if let status = notification.status {
-                            Text(preview(for: status))
-                                .font(.caption)
-                                .lineLimit(2)
+                if notification.type == "follow_request" {
+                    followRequestRow(for: notification)
+                        .onAppear {
+                            if notification.id == viewModel.notifications.last?.id {
+                                Task { await viewModel.loadMore() }
+                            }
+                        }
+                } else {
+                    // `NavigationLink(value:)`, not a plain `Button` wrapping the row -- a `List`
+                    // row's own selection gesture unreliably swallows a nested `Button`'s tap (the
+                    // exact bug already found and fixed this way for the Settings profile row);
+                    // `NavigationLink` is the mechanism that actually pushes reliably from inside a
+                    // `List` row.
+                    NavigationLink(value: route(for: notification)) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            AccountRow(account: notification.account, subtitle: description(for: notification))
+                            if let status = notification.status {
+                                Text(preview(for: status))
+                                    .font(.caption)
+                                    .lineLimit(2)
+                            }
                         }
                     }
-                }
-                .swipeActions {
-                    Button("Dismiss", role: .destructive) { viewModel.dismiss(notification) }
-                }
-                .onAppear {
-                    if notification.id == viewModel.notifications.last?.id {
-                        Task { await viewModel.loadMore() }
+                    .swipeActions {
+                        Button("Dismiss", role: .destructive) { viewModel.dismiss(notification) }
+                    }
+                    .onAppear {
+                        if notification.id == viewModel.notifications.last?.id {
+                            Task { await viewModel.loadMore() }
+                        }
                     }
                 }
             }
@@ -50,6 +61,31 @@ struct NotificationsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
+    }
+
+    /// Not a `NavigationLink` row like the rest -- it needs three inline action buttons, so it
+    /// uses the same non-`NavigationLink` shape `DirectoryView` already proves works from inside a
+    /// `List` row: a plain `Button` wrapping just `AccountRow` for tap-to-profile, with the action
+    /// buttons as siblings rather than nested inside a `NavigationLink`'s label (the gesture
+    /// conflict noted above is specifically about that nesting, not about sibling `Button`s).
+    private func followRequestRow(for notification: LarpnetNotification) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { onOpenProfile(notification.account.id) } label: {
+                AccountRow(account: notification.account, subtitle: description(for: notification))
+            }
+            .buttonStyle(.plain)
+            HStack {
+                Button("Accept") { viewModel.acceptFollowRequest(notification) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Button("Accept & follow back") { viewModel.acceptAndFollowBackFollowRequest(notification) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("Decline", role: .destructive) { viewModel.declineFollowRequest(notification) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
     }
 
     private func route(for notification: LarpnetNotification) -> AppRoute {
@@ -80,6 +116,7 @@ struct NotificationsView: View {
             && notification.status?.account.id == viewModel.selfAccountId
         switch notification.type {
         case "follow": return "followed you"
+        case "follow_request": return "requested to follow you"
         case "favourite": return isOwnStatus ? "favourited your post" : "favourited a reply in your thread"
         case "reblog": return isOwnStatus ? "boosted your post" : "boosted a reply in your thread"
         case "mention": return "mentioned you"

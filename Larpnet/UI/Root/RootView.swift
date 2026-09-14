@@ -20,6 +20,7 @@ struct RootView: View {
     @State private var profilePath: [AppRoute] = []
     @State private var albumsPath: [AppRoute] = []
     @State private var mediaPath: [AppRoute] = []
+    @State private var contactsPath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
 
     var body: some View {
@@ -50,6 +51,7 @@ struct RootView: View {
         case .profile: tabStack(path: $profilePath) { destinationContent(for: .profile, path: $profilePath) }
         case .albums: tabStack(path: $albumsPath) { destinationContent(for: .albums, path: $albumsPath) }
         case .media: tabStack(path: $mediaPath) { destinationContent(for: .media, path: $mediaPath) }
+        case .contacts: tabStack(path: $contactsPath) { destinationContent(for: .contacts, path: $contactsPath) }
         }
     }
 
@@ -110,7 +112,10 @@ struct RootView: View {
                 .navigationTitle("Directory")
                 .navigationBarTitleDisplayMode(.inline)
             case .notifications:
-                NotificationsView(appContainer: appContainer)
+                NotificationsView(
+                    appContainer: appContainer,
+                    onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) }
+                )
                     .navigationTitle("Notifications")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
@@ -142,6 +147,13 @@ struct RootView: View {
                     appContainer: appContainer,
                     onOpenThread: { path.wrappedValue.append(.thread(statusId: $0)) }
                 )
+            case .contacts:
+                ContactsView(
+                    appContainer: appContainer,
+                    onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) }
+                )
+                .navigationTitle("Contacts")
+                .navigationBarTitleDisplayMode(.inline)
             }
         }
         .toolbar {

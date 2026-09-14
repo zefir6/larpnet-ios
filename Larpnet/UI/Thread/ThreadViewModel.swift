@@ -135,6 +135,17 @@ final class ThreadViewModel {
         }
     }
 
+    /// Local-only (see `Poll`'s doc comment). Waits for the server's tally rather than
+    /// optimistically updating -- see `TimelineViewModel.votePoll`'s doc comment.
+    func votePoll(statusId: String, choices: [Int]) {
+        guard let pollId = currentStatus(id: statusId)?.poll?.id else { return }
+        Task {
+            let api = try? appContainer.friendicaAPI()
+            guard let poll = try? await api?.votePoll(id: pollId, choices: choices) else { return }
+            apply(id: statusId) { $0.poll = poll }
+        }
+    }
+
     private func currentStatus(id: String) -> Status? {
         if let f = focus {
             if f.id == id { return f }

@@ -1,0 +1,26 @@
+{
+    "id": "555001",
+    "created_at": "2026-09-01T10:00:00.000Z",
+    "content": "<p>Best larp snack?</p>",
+    "spoiler_text": "",
+    "sensitive": false,
+    "visibility": "public",
+    "account": {
+        "id": "42",
+        "username": "testuser"
+    },
+    "poll": {
+        "id": "77",
+        "expires_at": "2026-09-02T10:00:00.000Z",
+        "expired": false,
+        "multiple": false,
+        "votes_count": 3,
+        "voters_count": 3,
+        "voted": true,
+        "own_votes": [1],
+        "options": [
+            { "title": "Pierogi", "votes_count": 1 },
+            { "title": "Bigos", "votes_count": 2 }
+        ]
+    }
+}

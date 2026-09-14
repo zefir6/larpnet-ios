@@ -70,8 +70,9 @@ struct PollOption: Decodable, Sendable, Hashable {
     }
 }
 
-/// Read-only: poll voting is unimplemented server-side, same as Android -- the UI only ever
-/// displays this, never submits votes.
+/// Poll voting/creation is local-only server-side: a poll created here (or a vote cast here)
+/// never federates to/from other instances. `voted`/`ownVotes` reflect only this instance's own
+/// vote record for the current user, via `FriendicaAPIClient.votePoll`.
 struct Poll: Decodable, Sendable, Hashable {
     var id: String
     var expiresAt: Date?
@@ -80,11 +81,13 @@ struct Poll: Decodable, Sendable, Hashable {
     var votesCount: Int
     var options: [PollOption]
     var voted: Bool
+    var ownVotes: [Int]?
 
     enum CodingKeys: String, CodingKey {
         case id, expired, multiple, options, voted
         case expiresAt = "expires_at"
         case votesCount = "votes_count"
+        case ownVotes = "own_votes"
     }
 
     init(from decoder: Decoder) throws {
@@ -96,6 +99,7 @@ struct Poll: Decodable, Sendable, Hashable {
         votesCount = c.decode(.votesCount, default: 0)
         options = (try? c.decodeIfPresent(LossyArray<PollOption>.self, forKey: .options))??.elements ?? []
         voted = c.decode(.voted, default: false)
+        ownVotes = try? c.decodeIfPresent([Int].self, forKey: .ownVotes)
     }
 }
 
@@ -152,6 +156,7 @@ struct Status: Decodable, Sendable, Hashable, HasID, Identifiable {
             && lhs.reblogsCount == rhs.reblogsCount && lhs.repliesCount == rhs.repliesCount
             && lhs.content == rhs.content && lhs.spoilerText == rhs.spoilerText
             && lhs.sensitive == rhs.sensitive && lhs._reblog == rhs._reblog
+            && lhs.poll == rhs.poll
     }
 
     // Equal values (checked above) always share this hash -- the reverse isn't required for
