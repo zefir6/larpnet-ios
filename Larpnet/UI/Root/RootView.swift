@@ -120,6 +120,11 @@ struct RootView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
+                            Button { path.wrappedValue.append(.chat) } label: {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                            }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
                             Button { path.wrappedValue.append(.messages) } label: {
                                 Image(systemName: "envelope")
                             }
@@ -194,7 +199,8 @@ struct RootView: View {
                             onReply: { composeContext = ComposeContext(replyToId: $0.id) },
                             onEditProfile: { path.wrappedValue.append(.editProfile) },
                             onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) },
-                            onOpenAlbums: { path.wrappedValue.append(.destination(.albums)) }
+                            onOpenAlbums: { path.wrappedValue.append(.destination(.albums)) },
+                            onOpenChat: { path.wrappedValue.append(.chatThread(.nickname($0))) }
                         )
                     case .editProfile:
                         EditProfileView(appContainer: appContainer, onSaved: {})
@@ -223,6 +229,30 @@ struct RootView: View {
                         )
                     case .messageThread(let accountId, let conversationId):
                         ConversationThreadView(accountId: accountId, conversationId: conversationId, appContainer: appContainer)
+                    case .chat:
+                        ChatView(
+                            appContainer: appContainer,
+                            onOpenRoom: { room in
+                                path.wrappedValue.append(.chatThread(.room(id: room.id, name: room.name)))
+                            },
+                            onNewChat: { path.wrappedValue.append(.newChat) }
+                        )
+                    case .newChat:
+                        SearchView(
+                            appContainer: appContainer,
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            onSelectAccount: { account in
+                                path.wrappedValue.removeLast()
+                                // Matrix identities only exist for local users (see
+                                // `larpnet_matrix_localpart()`) -- `username`, not `acct`, is
+                                // the Friendica nickname; a remote pick fails visibly via
+                                // `errorMessage` rather than silently, same as any other
+                                // not-actually-chattable target would.
+                                path.wrappedValue.append(.chatThread(.nickname(account.username)))
+                            }
+                        )
+                    case .chatThread(let target):
+                        ChatThreadView(target: target, appContainer: appContainer)
                     case .blockedAccounts:
                         BlockedAccountsView(appContainer: appContainer)
                     case .hiddenPosts:

@@ -158,6 +158,7 @@ struct SettingsView: View {
             Section {
                 Button("Log out", role: .destructive) {
                     appContainer.tokenStore.clear()
+                    appContainer.matrixClientStore.clearSession()
                     onLoggedOut()
                 }
             }

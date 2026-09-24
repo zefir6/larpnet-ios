@@ -448,6 +448,16 @@ final class FriendicaAPIClient: Sendable {
         }
     }
 
+    // MARK: - Matrix chat
+
+    /// `POST /larpnet_matrix` -- the `larpnet_matrix` addon's native-app identity endpoint
+    /// (`larpnet_matrix_post()`). Any valid app token works, same trust level as reading the
+    /// user's own timeline. Returns a short-lived (60s) JWT the caller trades at the returned
+    /// homeserver's `/login` for a real Matrix session -- see `MatrixClientStore`.
+    func matrixLogin() async throws -> MatrixLoginResponse {
+        try await send(path: "larpnet_matrix", method: "POST")
+    }
+
     // MARK: - Media
 
     /// Uploads the avatar via Friendica's legacy Twitter-compatible
