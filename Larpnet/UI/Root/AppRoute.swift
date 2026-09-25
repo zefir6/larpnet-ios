@@ -13,6 +13,14 @@ enum AppRoute: Hashable {
     case messages
     case newMessage
     case messageThread(accountId: String, conversationId: String?)
+    /// Native Matrix chat -- a second, separate messaging system from classic Friendica DMs
+    /// above (see `MatrixClientStore`'s doc comment), so it gets its own routes rather than
+    /// folding into `.messages`.
+    case chat
+    case newChat
+    case chatThread(ChatThreadTarget)
+    case chatRoomInfo(roomId: String)
+    case addChatMember(roomId: String)
     case blockedAccounts
     case hiddenPosts
     case blockedPosts

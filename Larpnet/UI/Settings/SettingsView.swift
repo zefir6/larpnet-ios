@@ -7,6 +7,8 @@ import SwiftUI
 /// logout.
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
+    @State private var showResetRecoveryConfirm = false
+    @State private var showResetRecoverySheet = false
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
 
@@ -112,6 +114,23 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Chat") {
+                Button("Resetuj klucz odzyskiwania", role: .destructive) {
+                    showResetRecoveryConfirm = true
+                }
+            }
+            .confirmationDialog(
+                "To usunie dostęp do historii czatu za pomocą starego klucza na nowych urządzeniach. Tej operacji nie można odwrócić.",
+                isPresented: $showResetRecoveryConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Resetuj", role: .destructive) { showResetRecoverySheet = true }
+                Button("Anuluj", role: .cancel) {}
+            }
+            .sheet(isPresented: $showResetRecoverySheet) {
+                RecoveryKeyView(mode: .reset, appContainer: appContainer, onDone: { showResetRecoverySheet = false })
+            }
+
             Section("Following") {
                 NavigationLink(value: AppRoute.followedThreads) {
                     Label("Followed threads", systemImage: "bookmark")
@@ -158,6 +177,7 @@ struct SettingsView: View {
             Section {
                 Button("Log out", role: .destructive) {
                     appContainer.tokenStore.clear()
+                    appContainer.matrixClientStore.clearSession()
                     onLoggedOut()
                 }
             }

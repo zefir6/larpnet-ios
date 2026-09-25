@@ -76,6 +76,7 @@ final class TokenStore: @unchecked Sendable {
         static let clientSecret = "client_secret"
         static let accessToken = "access_token"
         static let preferredInstance = "preferred_instance"
+        static let matrixDeviceId = "matrix_device_id"
     }
 
     init() {
@@ -105,6 +106,15 @@ final class TokenStore: @unchecked Sendable {
     var accessToken: String? {
         get { keychain.get(Key.accessToken) }
         set { keychain.set(newValue, for: Key.accessToken) }
+    }
+
+    /// Stable per-device id for the Matrix session, generated once and reused across launches
+    /// (see `MatrixClientStore`) -- reusing it makes Synapse re-issue a token for the same
+    /// device rather than registering a new one on every login. Cleared by `clear()`: a
+    /// different account logging into this device afterward must not inherit it.
+    var matrixDeviceId: String? {
+        get { keychain.get(Key.matrixDeviceId) }
+        set { keychain.set(newValue, for: Key.matrixDeviceId) }
     }
 
     /// `pushEnabled` is not a secret -- kept in `UserDefaults`, and deliberately *not* cleared
@@ -185,6 +195,11 @@ final class TokenStore: @unchecked Sendable {
     /// `pushEnabled` alone -- same split as Android's `clear()`. Also clears `currentAccountId`
     /// -- session identity, not a UI preference like the properties above -- and
     /// `hasAcceptedTerms`, so `TermsGateView` is shown again before the next login.
+    ///
+    /// Does NOT touch the Matrix session (crypto store on disk, `matrixDeviceId`) -- that's a
+    /// separate concern with its own on-disk state `MatrixClientStore.clearSession()` must clean
+    /// up too; every caller of `clear()` must also call that, or a second account logging into
+    /// this device would silently inherit the first account's local Matrix crypto store.
     func clear() {
         instanceBaseURL = nil
         clientId = nil
@@ -192,5 +207,11 @@ final class TokenStore: @unchecked Sendable {
         accessToken = nil
         currentAccountId = nil
         hasAcceptedTerms = false
+    }
+
+    /// Only `MatrixClientStore.clearSession()` calls this -- kept here since Keychain access is
+    /// this type's job, but deliberately not folded into `clear()` itself (see its doc comment).
+    func clearMatrixDeviceId() {
+        matrixDeviceId = nil
     }
 }
