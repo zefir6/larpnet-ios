@@ -19,6 +19,8 @@ enum AppRoute: Hashable {
     case chat
     case newChat
     case chatThread(ChatThreadTarget)
+    case chatRoomInfo(roomId: String)
+    case addChatMember(roomId: String)
     case blockedAccounts
     case hiddenPosts
     case blockedPosts

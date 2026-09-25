@@ -18,12 +18,17 @@ enum MatrixError: Error {
 ///   identical pattern).
 /// - The crypto/session store on disk (`sessionPaths`), keyed by the Matrix user id, DOES
 ///   persist across launches -- that's what makes E2EE history survive a relaunch.
-/// - No cross-signing / secret-storage bootstrap -- explicit policy carried over from web
-///   (`addon/larpnet_matrix/CLAUDE.md`'s "Why there's no device-verification UI": a single
-///   device sends/receives E2EE fine without it, and an operator-derivable recovery key is a
-///   security regression, not a convenience). `ClientBuilder`'s `autoEnableCrossSigning`/
-///   `autoEnableBackups` are deliberately left at their defaults (off) -- do not turn them on
-///   without re-reading that policy first.
+/// - `ClientBuilder`'s `autoEnableCrossSigning`/`autoEnableBackups` are deliberately left at
+///   their defaults (off) -- no interactive device-verification (SAS/emoji) UI, same policy as
+///   web (`addon/larpnet_matrix/CLAUDE.md`'s "Why there's no device-verification UI"). This does
+///   NOT mean no recovery key at all, though: the actual policy (see that same doc, updated once
+///   web shipped user-chosen recovery passphrases) is "no *operator-derivable* key" -- a
+///   recovery key/passphrase the user generates and holds themselves, never sent to or
+///   knowable by the server, is fine and is what `setUpRecovery()`/`restoreRecovery()`/
+///   `resetRecovery()` below implement (mirroring web's `client/src/recovery.js`). Confirmed via
+///   a live spike against test.larpnet.pl (2026-09-25) that `Encryption.enableRecovery()` does
+///   NOT hit the same JWT/UIA wall `bootstrapCrossSigning()` does on web -- it's a plain
+///   secret-storage/backup operation, not a cross-signing key upload.
 @MainActor
 final class MatrixClientStore {
     private let tokenStore: TokenStore
@@ -131,6 +136,134 @@ final class MatrixClientStore {
         return handle
     }
 
+    /// Members (join+invite, excluding self) plus the raw room-name state event and whether
+    /// this is a group (more than one other member) -- mirrors the web client's
+    /// `RoomInfoModal.jsx` (`others`/`isGroup` computed the same way). `rawName`, not
+    /// `displayName()`, because for a 1:1 DM `displayName()` always prefers the other person's
+    /// own name -- same reason `RoomInfoModal.jsx` hides rename there.
+    func roomInfo(roomId: String) async throws -> ChatRoomInfo {
+        let client = try await ensureClient()
+        guard let room = try client.getRoom(roomId: roomId) else { throw MatrixError.roomNotFound }
+        let selfId = try client.userId()
+
+        let iterator = try await room.members()
+        var all: [RoomMember] = []
+        while let chunk = iterator.nextChunk(chunkSize: 100), !chunk.isEmpty {
+            all.append(contentsOf: chunk)
+        }
+        let others = all.filter { ($0.membership == .join || $0.membership == .invite) && $0.userId != selfId }
+        let members = others.map {
+            ChatRoomMember(userId: $0.userId, displayName: resolvedName(userId: $0.userId, fallbackDisplayName: $0.displayName))
+        }
+        return ChatRoomInfo(roomId: roomId, rawName: room.rawName() ?? "", isGroup: members.count != 1, members: members)
+    }
+
+    func renameRoom(roomId: String, name: String) async throws {
+        let client = try await ensureClient()
+        guard let room = try client.getRoom(roomId: roomId) else { throw MatrixError.roomNotFound }
+        try await room.setName(name: name)
+    }
+
+    /// `nickname` is a plain Friendica nickname, same convention as `openOrCreateDirectRoom()`.
+    func inviteMember(roomId: String, nickname: String) async throws {
+        let client = try await ensureClient()
+        guard let room = try client.getRoom(roomId: roomId) else { throw MatrixError.roomNotFound }
+        guard let serverName else { throw MatrixError.malformedIdentity }
+        try await room.inviteUserById(userId: "@\(nickname.lowercased()):\(serverName)")
+    }
+
+    func removeMember(roomId: String, userId: String) async throws {
+        let client = try await ensureClient()
+        guard let room = try client.getRoom(roomId: roomId) else { throw MatrixError.roomNotFound }
+        try await room.kickUser(userId: userId, reason: nil)
+    }
+
+    func leaveRoom(roomId: String) async throws {
+        let client = try await ensureClient()
+        guard let room = try client.getRoom(roomId: roomId) else { throw MatrixError.roomNotFound }
+        try await room.leave()
+    }
+
+    /// Which recovery prompt (if any) `ChatView` should show right after login -- mirrors the
+    /// web client's `getRecoveryStatus()`/`recoveryPrompt` (`recovery.js`/`App.jsx`).
+    /// `.disabled` means this account has never set up recovery anywhere (prompt setup);
+    /// `.incomplete` means recovery exists (set up on another device, or by this device in a
+    /// past install) but this device hasn't unlocked it yet (prompt restore). `.unknown`
+    /// resolves to one of the above via `waitForRecoveryState()` below; `.enabled` means this
+    /// device already has it unlocked, nothing to prompt.
+    enum RecoveryPromptKind {
+        case needsSetup
+        case needsRestore
+    }
+
+    func recoveryPromptKind() async throws -> RecoveryPromptKind? {
+        switch try await waitForRecoveryState() {
+        case .disabled: return .needsSetup
+        case .incomplete: return .needsRestore
+        case .enabled, .unknown: return nil
+        }
+    }
+
+    /// Sets up recovery for the first time on this account (`RecoveryState.disabled`) -- a
+    /// random key if `passphrase` is nil, otherwise derived from the phrase. Returns the
+    /// encoded recovery key/phrase to show the user once (there's no way to see it again).
+    func setUpRecovery(passphrase: String?) async throws -> String {
+        let client = try await ensureClient()
+        return try await client.encryption().enableRecovery(
+            waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
+        )
+    }
+
+    /// Unlocks this device's access to existing cross-device history, using either the raw
+    /// recovery key or the original passphrase -- `Encryption.recover()` accepts either as the
+    /// same string (the underlying Rust crate's own doc comment gives the exact example
+    /// `recovery.recover("my recovery key or passphrase")`).
+    func restoreRecovery(input: String) async throws {
+        let client = try await ensureClient()
+        try await client.encryption().recover(recoveryKey: input)
+    }
+
+    /// Resets recovery when the user has forgotten their key/phrase -- same scope as web's
+    /// `resetRecovery()` (see its doc comment in `client/src/recovery.js`/the addon's
+    /// `CLAUDE.md`): this is "let me set a new key", not a guarantee that a device which
+    /// already has the old keys locally loses access to old history. `resetRecoveryKey()`/
+    /// `recoverAndReset()` exist on this SDK but don't accept a passphrase -- a custom-
+    /// passphrase reset goes through disable-then-enable instead, which reaches the same end
+    /// state (a fresh secret-storage key/backup version) via the same path `setUpRecovery()`
+    /// already uses.
+    func resetRecovery(passphrase: String?) async throws -> String {
+        let client = try await ensureClient()
+        let encryption = client.encryption()
+        try await encryption.disableRecovery()
+        return try await encryption.enableRecovery(
+            waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
+        )
+    }
+
+    /// `Encryption.recoveryState()` starts at `.unknown` right after login until the SDK's
+    /// background crypto tasks resolve it -- waits for that via `recoveryStateListener` rather
+    /// than polling.
+    private func waitForRecoveryState() async throws -> RecoveryState {
+        let client = try await ensureClient()
+        let encryption = client.encryption()
+        return await withCheckedContinuation { continuation in
+            // Registers the listener *before* checking the current value (rather than the
+            // other way around) so a transition happening in between the two can't be missed.
+            // The listener's callback runs on the Rust side's own thread, so the "resume once"
+            // guard needs real synchronization, not just a captured `var` -- see `OnceBox`.
+            let box = OnceBox()
+            let bridge = RecoveryStateBridge { state in
+                guard state != .unknown else { return }
+                box.fire { continuation.resume(returning: state) }
+            }
+            box.handle = encryption.recoveryStateListener(listener: bridge)
+            let current = encryption.recoveryState()
+            if current != .unknown {
+                box.fire { continuation.resume(returning: current) }
+            }
+        }
+    }
+
     /// Called alongside `TokenStore.clear()` at logout (see `SettingsView`) -- deletes the
     /// on-disk crypto store and the persisted device id, so a different account logging into
     /// this device next doesn't inherit either. Best-effort server-side `logout()` first (so
@@ -205,15 +338,22 @@ final class MatrixClientStore {
     private func displayName(for room: Room) async -> String {
         let heroes = await room.heroes()
         if heroes.count == 1 {
-            let hero = heroes[0]
-            if let localpart = Self.localpart(of: hero.userId), let resolved = contactsByLocalpart[localpart] {
-                return resolved
-            }
-            if let name = hero.displayName, !name.isEmpty { return name }
-            return Self.localpart(of: hero.userId) ?? hero.userId
+            return resolvedName(userId: heroes[0].userId, fallbackDisplayName: heroes[0].displayName)
         }
         if let name = room.displayName(), !name.isEmpty { return name }
         return "Rozmowa"
+    }
+
+    /// Shared by the room-list hero name above and `roomInfo()`'s member list: prefer the
+    /// Friendica name we already know (covers a member who's never opened chat themselves, so
+    /// has no Matrix displayname yet) over the SDK-reported displayname, then fall back to the
+    /// bare localpart.
+    private func resolvedName(userId: String, fallbackDisplayName: String?) -> String {
+        if let localpart = Self.localpart(of: userId), let resolved = contactsByLocalpart[localpart] {
+            return resolved
+        }
+        if let name = fallbackDisplayName, !name.isEmpty { return name }
+        return Self.localpart(of: userId) ?? userId
     }
 
     private func preview(for room: Room) async -> (text: String?, timestamp: Date?) {
@@ -331,4 +471,36 @@ private final class SyncTickBridge: SyncListenerV2, Sendable {
     private let handler: @Sendable () -> Void
     init(handler: @escaping @Sendable () -> Void) { self.handler = handler }
     func onUpdate(response: SyncResponseV2) { handler() }
+}
+
+/// Runs `block` at most once, guarded by a lock -- `waitForRecoveryState()`'s listener callback
+/// fires on the Rust side's own thread, so a plain captured `var` isn't safe here (the compiler
+/// rejects it outright under strict concurrency checking); this is the minimal `@unchecked
+/// Sendable` box that satisfies it. `handle` itself is only ever written once, synchronously,
+/// before the listener that reads it can possibly fire.
+private final class OnceBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    var handle: TaskHandle?
+
+    func fire(_ block: () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !fired else { return }
+        fired = true
+        handle?.cancel()
+        block()
+    }
+}
+
+private final class RecoveryStateBridge: RecoveryStateListener, Sendable {
+    private let handler: @Sendable (RecoveryState) -> Void
+    init(handler: @escaping @Sendable (RecoveryState) -> Void) { self.handler = handler }
+    func onUpdate(status: RecoveryState) { handler(status) }
+}
+
+private final class RecoveryProgressBridge: EnableRecoveryProgressListener, Sendable {
+    private let handler: @Sendable (EnableRecoveryProgress) -> Void
+    init(handler: @escaping @Sendable (EnableRecoveryProgress) -> Void) { self.handler = handler }
+    func onUpdate(status: EnableRecoveryProgress) { handler(status) }
 }

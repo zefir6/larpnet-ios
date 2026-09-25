@@ -2,11 +2,13 @@ import SwiftUI
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
+    private let appContainer: AppContainer
     let onOpenRoom: (ChatRoom) -> Void
     let onNewChat: () -> Void
 
     init(appContainer: AppContainer, onOpenRoom: @escaping (ChatRoom) -> Void, onNewChat: @escaping () -> Void) {
         _viewModel = State(initialValue: ChatViewModel(appContainer: appContainer))
+        self.appContainer = appContainer
         self.onOpenRoom = onOpenRoom
         self.onNewChat = onNewChat
     }
@@ -45,6 +47,19 @@ struct ChatView: View {
             }
         }
         .task { await viewModel.loadInitial() }
+        .sheet(isPresented: Binding(
+            get: { viewModel.recoveryPrompt != nil },
+            set: { if !$0 { viewModel.dismissRecoveryPrompt() } }
+        )) {
+            if let kind = viewModel.recoveryPrompt {
+                RecoveryKeyView(
+                    mode: kind == .needsSetup ? .setup : .restore,
+                    appContainer: appContainer,
+                    onDone: { viewModel.dismissRecoveryPrompt() },
+                    onSkip: kind == .needsRestore ? { viewModel.dismissRecoveryPrompt() } : nil
+                )
+            }
+        }
         .overlay(alignment: .bottom) {
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)

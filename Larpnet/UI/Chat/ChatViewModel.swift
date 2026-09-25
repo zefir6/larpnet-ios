@@ -11,6 +11,8 @@ final class ChatViewModel {
     private(set) var rooms: [ChatRoom] = []
     private(set) var isLoading = false
     var errorMessage: String?
+    /// nil once resolved (nothing to show) -- see `MatrixClientStore.recoveryPromptKind()`.
+    private(set) var recoveryPrompt: MatrixClientStore.RecoveryPromptKind?
 
     private let appContainer: AppContainer
     private var updatesTask: Task<Void, Never>?
@@ -25,6 +27,11 @@ final class ChatViewModel {
         defer { isLoading = false }
         await refresh()
         subscribeToUpdates()
+        recoveryPrompt = try? await appContainer.matrixClientStore.recoveryPromptKind()
+    }
+
+    func dismissRecoveryPrompt() {
+        recoveryPrompt = nil
     }
 
     func refresh() async {

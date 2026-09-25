@@ -252,7 +252,29 @@ struct RootView: View {
                             }
                         )
                     case .chatThread(let target):
-                        ChatThreadView(target: target, appContainer: appContainer)
+                        ChatThreadView(
+                            target: target, appContainer: appContainer,
+                            onOpenInfo: { path.wrappedValue.append(.chatRoomInfo(roomId: $0)) }
+                        )
+                    case .chatRoomInfo(let roomId):
+                        ChatRoomInfoView(
+                            roomId: roomId, appContainer: appContainer,
+                            onAddMember: { path.wrappedValue.append(.addChatMember(roomId: roomId)) },
+                            onLeft: { path.wrappedValue.removeLast(min(2, path.wrappedValue.count)) }
+                        )
+                    case .addChatMember(let roomId):
+                        SearchView(
+                            appContainer: appContainer,
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            onSelectAccount: { account in
+                                Task {
+                                    try? await appContainer.matrixClientStore.inviteMember(
+                                        roomId: roomId, nickname: account.username
+                                    )
+                                    await MainActor.run { path.wrappedValue.removeLast() }
+                                }
+                            }
+                        )
                     case .blockedAccounts:
                         BlockedAccountsView(appContainer: appContainer)
                     case .hiddenPosts:

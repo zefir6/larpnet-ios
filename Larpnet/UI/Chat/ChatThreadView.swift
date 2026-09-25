@@ -2,9 +2,11 @@ import SwiftUI
 
 struct ChatThreadView: View {
     @State private var viewModel: ChatThreadViewModel
+    let onOpenInfo: (String) -> Void
 
-    init(target: ChatThreadTarget, appContainer: AppContainer) {
+    init(target: ChatThreadTarget, appContainer: AppContainer, onOpenInfo: @escaping (String) -> Void) {
         _viewModel = State(initialValue: ChatThreadViewModel(target: target, appContainer: appContainer))
+        self.onOpenInfo = onOpenInfo
     }
 
     var body: some View {
@@ -35,6 +37,13 @@ struct ChatThreadView: View {
         }
         .navigationTitle(viewModel.roomName ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let roomId = viewModel.roomId {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Info") { onOpenInfo(roomId) }
+                }
+            }
+        }
         .task { await viewModel.load() }
         .onDisappear { viewModel.close() }
     }

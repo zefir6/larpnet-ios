@@ -17,6 +17,7 @@ enum ChatThreadTarget: Hashable {
 @Observable
 final class ChatThreadViewModel {
     private(set) var roomName: String?
+    private(set) var roomId: String?
     private(set) var messages: [ChatMessage] = []
     private(set) var isLoading = false
     private(set) var isSending = false
@@ -37,16 +38,17 @@ final class ChatThreadViewModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            let roomId: String
+            let resolvedRoomId: String
             switch target {
             case .room(let id, let name):
-                roomId = id
+                resolvedRoomId = id
                 roomName = name
             case .nickname(let nickname):
                 roomName = nickname
-                roomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(nickname: nickname)
+                resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(nickname: nickname)
             }
-            let newHandle = try await appContainer.matrixClientStore.openTimeline(roomId: roomId)
+            roomId = resolvedRoomId
+            let newHandle = try await appContainer.matrixClientStore.openTimeline(roomId: resolvedRoomId)
             handle = newHandle
             messagesTask = Task { [weak self] in
                 for await snapshot in newHandle.messages {

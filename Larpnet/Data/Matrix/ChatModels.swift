@@ -18,3 +18,19 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     let body: String
     let timestamp: Date
 }
+
+/// One other member of a room, display-ready -- `MatrixClientStore.roomInfo()`'s member list.
+struct ChatRoomMember: Identifiable, Sendable, Hashable {
+    let userId: String
+    let displayName: String
+    var id: String { userId }
+}
+
+/// `MatrixClientStore.roomInfo()`'s output shape -- mirrors the web client's `RoomInfoModal.jsx`
+/// (`others`/`isGroup`/`room.name`).
+struct ChatRoomInfo: Sendable {
+    let roomId: String
+    let rawName: String
+    let isGroup: Bool
+    let members: [ChatRoomMember]
+}
