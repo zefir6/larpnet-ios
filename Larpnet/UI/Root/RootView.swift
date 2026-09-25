@@ -21,6 +21,7 @@ struct RootView: View {
     @State private var albumsPath: [AppRoute] = []
     @State private var mediaPath: [AppRoute] = []
     @State private var contactsPath: [AppRoute] = []
+    @State private var chatPath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
 
     var body: some View {
@@ -52,6 +53,7 @@ struct RootView: View {
         case .albums: tabStack(path: $albumsPath) { destinationContent(for: .albums, path: $albumsPath) }
         case .media: tabStack(path: $mediaPath) { destinationContent(for: .media, path: $mediaPath) }
         case .contacts: tabStack(path: $contactsPath) { destinationContent(for: .contacts, path: $contactsPath) }
+        case .chat: tabStack(path: $chatPath) { destinationContent(for: .chat, path: $chatPath) }
         }
     }
 
@@ -159,6 +161,14 @@ struct RootView: View {
                 )
                 .navigationTitle("Contacts")
                 .navigationBarTitleDisplayMode(.inline)
+            case .chat:
+                ChatView(
+                    appContainer: appContainer,
+                    onOpenRoom: { room in
+                        path.wrappedValue.append(.chatThread(.room(id: room.id, name: room.name)))
+                    },
+                    onNewChat: { path.wrappedValue.append(.newChat) }
+                )
             }
         }
         .toolbar {
