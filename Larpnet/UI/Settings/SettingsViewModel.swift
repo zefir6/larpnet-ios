@@ -42,6 +42,13 @@ final class SettingsViewModel {
             }
         } else {
             BackgroundRefresh.cancel()
+            // Best-effort: only relevant if a device token was ever actually received (real
+            // push infra configured, permission granted at some point). Logging out entirely
+            // would clean this up automatically via `MatrixClientStore.clearSession()`'s own
+            // `logout()` call -- this is only for "still logged in, just disabled push".
+            if let pushkey = appContainer.tokenStore.apnsDeviceTokenHex {
+                Task { await appContainer.matrixClientStore.unregisterPusher(pushkey: pushkey) }
+            }
         }
     }
 

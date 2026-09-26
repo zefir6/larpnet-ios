@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct LarpnetApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appContainer: AppContainer
     @State private var isLoggedIn: Bool
     @State private var hasAcceptedTerms: Bool
@@ -17,6 +18,12 @@ struct LarpnetApp: App {
         // notification *authorization* has to wait until `body` runs (it's async, `init()`
         // isn't), see the `.task` below.
         BackgroundRefresh.register(appContainer: container)
+        // `@UIApplicationDelegateAdaptor`'s wrapped value already exists by this point in
+        // `init()` (SwiftUI initializes property wrappers before the init body runs) -- so
+        // `AppDelegate`'s own `didRegisterForRemoteNotificationsWithDeviceToken` callback,
+        // which can fire at any point after `registerForRemoteNotifications()` is called, is
+        // guaranteed to see this set.
+        appDelegate.appContainer = container
     }
 
     var body: some Scene {

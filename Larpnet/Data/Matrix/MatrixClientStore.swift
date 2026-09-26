@@ -17,7 +17,11 @@ enum MatrixError: Error {
 ///   registering a new one, so this is cheap and safe (confirmed against the web client's
 ///   identical pattern).
 /// - The crypto/session store on disk (`sessionPaths`), keyed by the Matrix user id, DOES
-///   persist across launches -- that's what makes E2EE history survive a relaunch.
+///   persist across launches -- that's what makes E2EE history survive a relaunch. Lives in
+///   the shared App Group container (`MatrixSessionPaths`), not this app's own `Application
+///   Support` directory, so `NotificationServiceExtension` can reach the same store to decrypt
+///   push notifications -- see that type's own doc comment for the one-time migration cost this
+///   caused for anyone who installed before push notifications shipped.
 /// - `ClientBuilder`'s `autoEnableCrossSigning`/`autoEnableBackups` are deliberately left at
 ///   their defaults (off) -- no interactive device-verification (SAS/emoji) UI, same policy as
 ///   web (`addon/larpnet_matrix/CLAUDE.md`'s "Why there's no device-verification UI"). This does
@@ -42,6 +46,11 @@ final class MatrixClientStore {
     /// and so has no Matrix displayname yet.
     private var contactsByLocalpart: [String: String] = [:]
     private(set) var serverName: String?
+    /// This deployment's Matrix push gateway URL (already includes the shared secret as a
+    /// query param -- see `larpnet_matrix_push_gateway_url()` server-side), or nil if the
+    /// server hasn't got push configured yet. Set once per `ensureClient()` login, same
+    /// lifetime as `serverName`.
+    private var pushGatewayUrl: String?
 
     init(tokenStore: TokenStore, friendicaAPI: @escaping () throws -> FriendicaAPIClient) {
         self.tokenStore = tokenStore
@@ -72,8 +81,9 @@ final class MatrixClientStore {
             throw MatrixError.malformedIdentity
         }
         serverName = resolvedServerName
+        pushGatewayUrl = identity.pushGatewayUrl
 
-        let sessionDir = try Self.sessionDirectory(for: identity.userId)
+        let sessionDir = try MatrixSessionPaths.sessionDirectory(for: identity.userId)
         let newClient = try await ClientBuilder()
             .homeserverUrl(url: identity.homeserver)
             .sessionPaths(dataPath: sessionDir.path, cachePath: sessionDir.path)
@@ -276,6 +286,7 @@ final class MatrixClientStore {
         roomListContinuation = nil
         contactsByLocalpart = [:]
         serverName = nil
+        pushGatewayUrl = nil
 
         let oldClient = client
         client = nil
@@ -283,11 +294,60 @@ final class MatrixClientStore {
         Task.detached {
             let userId = try? oldClient?.userId()
             try? await oldClient?.logout()
-            if let userId, let dir = try? Self.sessionDirectory(for: userId) {
+            if let userId, let dir = try? MatrixSessionPaths.sessionDirectory(for: userId) {
                 try? FileManager.default.removeItem(at: dir)
             }
         }
         tokenStore.clearMatrixDeviceId()
+    }
+
+    /// Registers this device's APNs token as a Matrix pusher, so Synapse starts calling
+    /// larpnet_matrix's push gateway for new messages in any room this account is in. A no-op
+    /// if the server hasn't got the gateway configured yet (`pushGatewayUrl` nil) -- same "safe
+    /// until configured" convention the gateway itself follows.
+    ///
+    /// `format: .eventIdOnly` tells Synapse to never include full event content in the gateway
+    /// call, matching the gateway's own guarantee independently -- both sides agree message
+    /// content never reaches Apple, not just this one.
+    ///
+    /// `append: false`: replaces any existing pusher for this (app_id, pushkey) pair rather
+    /// than accumulating duplicates across re-logins/token refreshes -- the pushkey (APNs
+    /// device token) is the actual identity here, not the device id, so there's nothing worth
+    /// keeping from a previous registration.
+    func registerPusher(deviceToken: Data) async {
+        guard let gatewayUrl = pushGatewayUrl else { return }
+        guard let client = try? await ensureClient() else { return }
+        let pushkey = Self.hexEncode(deviceToken)
+        try? await client.setPusher(
+            identifiers: PusherIdentifiers(pushkey: pushkey, appId: "pl.larpnet.ios"),
+            kind: .http(data: HttpPusherData(url: gatewayUrl, format: .eventIdOnly, defaultPayload: "{}")),
+            appDisplayName: "Larpnet iOS",
+            deviceDisplayName: "Larpnet iOS",
+            profileTag: nil,
+            lang: "pl",
+            append: false
+        )
+    }
+
+    /// Called when the user turns off push notifications (Settings) without logging out
+    /// entirely -- `clearSession()`'s own `logout()` call already removes every pusher for
+    /// that device server-side, so this is only needed for the "still logged in, just disabled
+    /// push" case.
+    func unregisterPusher(deviceToken: Data) async {
+        await unregisterPusher(pushkey: Self.hexEncode(deviceToken))
+    }
+
+    /// Same as above, taking the already hex-encoded pushkey directly -- `SettingsViewModel`
+    /// only ever has `TokenStore.apnsDeviceTokenHex` cached (see that property's own doc
+    /// comment for why: no live `Data` device token is re-fetchable on demand), not the raw
+    /// `Data` `AppDelegate` receives fresh.
+    func unregisterPusher(pushkey: String) async {
+        guard let client = try? await ensureClient() else { return }
+        try? await client.deletePusher(identifiers: PusherIdentifiers(pushkey: pushkey, appId: "pl.larpnet.ios"))
+    }
+
+    private static func hexEncode(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Private
@@ -315,20 +375,6 @@ final class MatrixClientStore {
     private nonisolated static func localpart(of mxid: String) -> String? {
         guard mxid.hasPrefix("@"), let colonIndex = mxid.firstIndex(of: ":") else { return nil }
         return String(mxid[mxid.index(after: mxid.startIndex)..<colonIndex]).lowercased()
-    }
-
-    /// One `Application Support` subdirectory per Matrix user id -- reused across launches
-    /// (see this type's own doc comment) and removed wholesale by `clearSession()`. `nonisolated`
-    /// -- `clearSession()` calls this from a detached (off-main-actor) cleanup task, and it
-    /// touches no instance state.
-    private nonisolated static func sessionDirectory(for userId: String) throws -> URL {
-        let safe = userId.replacingOccurrences(of: "@", with: "").replacingOccurrences(of: ":", with: "_")
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
-        )
-        let dir = base.appendingPathComponent("MatrixSession", isDirectory: true).appendingPathComponent(safe, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
     }
 
     /// Room-list display name -- same algorithm as the web client's `roomDisplayName()`: for a

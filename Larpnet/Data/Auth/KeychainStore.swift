@@ -6,9 +6,27 @@ import Security
 /// mirroring the handful of string fields Android keeps in `EncryptedSharedPreferences`.
 struct KeychainStore: Sendable {
     private let service: String
+    private let accessGroup: String?
 
-    init(service: String = "pl.larpnet.ios.auth") {
+    /// Shares this Keychain data with `NotificationServiceExtension`, which needs the access
+    /// token + instance URL (to redo the `POST /larpnet_matrix` JWT trade itself) and the
+    /// Matrix device id (to log into the *same* device Synapse already knows, not register a
+    /// new one on every push) -- see that target's own `NotificationService.swift`.
+    ///
+    /// **Not** the `$(AppIdentifierPrefix)`-templated form the `.entitlements` files use --
+    /// that substitution only happens to the literal PLIST value at codesign time, never to a
+    /// Swift string literal at runtime. `kSecAttrAccessGroup` needs the already-resolved value,
+    /// so the real Team ID (`ZR99PJ76A8`, same as `project.yml`'s `DEVELOPMENT_TEAM`) is
+    /// hardcoded here directly -- this is not a mistake, using the template string here would
+    /// simply fail to match the entitlement's real resolved group at runtime.
+    ///
+    /// Requires the "Keychain Sharing" capability + this exact group registered on *both*
+    /// targets' App IDs in the Apple Developer portal.
+    static let sharedAccessGroup = "ZR99PJ76A8.pl.larpnet.ios.shared"
+
+    init(service: String = "pl.larpnet.ios.auth", accessGroup: String? = Self.sharedAccessGroup) {
         self.service = service
+        self.accessGroup = accessGroup
     }
 
     func get(_ key: String) -> String? {
@@ -19,6 +37,7 @@ struct KeychainStore: Sendable {
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitOne,
         ]
+        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         query.removeAll()
@@ -32,11 +51,12 @@ struct KeychainStore: Sendable {
             return
         }
         let data = Data(value.utf8)
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: key,
         ]
+        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
             SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
         } else {
@@ -48,11 +68,12 @@ struct KeychainStore: Sendable {
     }
 
     func remove(_ key: String) {
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: key,
         ]
+        if let accessGroup { query[kSecAttrAccessGroup] = accessGroup }
         SecItemDelete(query as CFDictionary)
     }
 }
@@ -115,6 +136,19 @@ final class TokenStore: @unchecked Sendable {
     var matrixDeviceId: String? {
         get { keychain.get(Key.matrixDeviceId) }
         set { keychain.set(newValue, for: Key.matrixDeviceId) }
+    }
+
+    /// The last APNs device token this app was handed (`AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken`),
+    /// hex-encoded -- cached only so `SettingsViewModel.togglePush(false)` can unregister the
+    /// Matrix pusher without logging out entirely (there is no API to re-fetch the current
+    /// device token on demand the way Android's `FirebaseMessaging.getInstance().token` can;
+    /// this is the only way to have it available later). Not a secret -- `UserDefaults`, and
+    /// deliberately *not* cleared by `clear()`: `MatrixClientStore.clearSession()`'s own
+    /// `logout()` call already removes every pusher for this device server-side regardless of
+    /// this value, so there's nothing to protect by wiping it.
+    var apnsDeviceTokenHex: String? {
+        get { defaults.string(forKey: "apns_device_token_hex") }
+        set { defaults.set(newValue, forKey: "apns_device_token_hex") }
     }
 
     /// `pushEnabled` is not a secret -- kept in `UserDefaults`, and deliberately *not* cleared
