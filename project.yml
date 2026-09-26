@@ -61,6 +61,8 @@ targets:
     dependencies:
       - package: SwiftSoup
       - package: MatrixRustSDK
+      - target: LarpnetNotificationServiceExtension
+        embed: true
     info:
       path: Generated/Info.plist
       properties:
@@ -97,12 +99,40 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: pl.larpnet.ios
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.12"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.13"
+        CURRENT_PROJECT_VERSION: "15"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_EMIT_LOC_STRINGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_ENTITLEMENTS: Larpnet/Larpnet.entitlements
+
+  LarpnetNotificationServiceExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: NotificationServiceExtension/NotificationService.swift
+      - path: Larpnet/Data/Auth/KeychainStore.swift
+      - path: Larpnet/Data/Matrix/MatrixSessionPaths.swift
+      - path: Larpnet/Data/Matrix/MatrixNotificationPreview.swift
+    dependencies:
+      - package: MatrixRustSDK
+    info:
+      path: Generated/NotificationServiceExtension-Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: pl.larpnet.ios.NotificationServiceExtension
+        PRODUCT_NAME: LarpnetNotificationServiceExtension
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: "1.13"
+        CURRENT_PROJECT_VERSION: "15"
+        CODE_SIGN_ENTITLEMENTS: NotificationServiceExtension/NotificationServiceExtension.entitlements
 
   LarpnetTests:
     type: bundle.unit-test
