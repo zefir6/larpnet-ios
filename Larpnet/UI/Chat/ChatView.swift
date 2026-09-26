@@ -19,12 +19,7 @@ struct ChatView: View {
                 Button {
                     onOpenRoom(room)
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(room.name).font(.body.weight(.medium))
-                        if let preview = room.preview {
-                            Text(preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
+                    ChatRoomRow(room: room)
                 }
                 .buttonStyle(.plain)
             }
@@ -68,6 +63,31 @@ struct ChatView: View {
                     .padding(8)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding()
+            }
+        }
+    }
+}
+
+/// A room's row in the list -- initials avatar + name/preview + a last-activity timestamp,
+/// matching `AccountRow`'s layout (used by the classic Messages list) instead of a bare
+/// two-line text row.
+private struct ChatRoomRow: View {
+    let room: ChatRoom
+
+    var body: some View {
+        HStack(spacing: 10) {
+            InitialsAvatar(name: room.name)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(room.name).font(.body.weight(.medium)).lineLimit(1)
+                if let preview = room.preview {
+                    Text(preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            if let timestamp = room.timestamp {
+                Text(RelativeTime.short(from: timestamp))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
