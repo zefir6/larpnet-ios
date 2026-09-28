@@ -270,10 +270,20 @@ final class MatrixClientStore {
     /// passphrase reset goes through disable-then-enable instead, which reaches the same end
     /// state (a fresh secret-storage key/backup version) via the same path `setUpRecovery()`
     /// already uses.
+    ///
+    /// Only calls `disableRecovery()` when recovery is actually currently `.enabled` --
+    /// confirmed live that calling it on an account that never set up recovery/backups throws
+    /// `ClientError.Generic(msg: "backups are not enabled", details: "BackupNotEnabled")`
+    /// (`Recovery.disable()`'s first step is `backups().disable()`, which requires a backup to
+    /// already exist). The Settings screen offers this button unconditionally, so this has to
+    /// tolerate "there's nothing to disable yet" and just enable fresh recovery in that case --
+    /// functionally the same outcome `setUpRecovery()` would give.
     func resetRecovery(passphrase: String?) async throws -> String {
         let client = try await ensureClient()
         let encryption = client.encryption()
-        try await encryption.disableRecovery()
+        if try await waitForRecoveryState() == .enabled {
+            try await encryption.disableRecovery()
+        }
         return try await encryption.enableRecovery(
             waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
         )
