@@ -12,6 +12,10 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     /// "Interesting" unread message count from `Room.roomInfo().numUnreadMessages` -- drives
     /// the room row's unread styling and the Chat tab's badge total.
     let unreadCount: Int
+    /// `mxc://` room avatar, from `Room.avatarUrl()` (falling back to the 1:1 hero's own avatar
+    /// when the room itself has none) -- resolved to a real image via
+    /// `MatrixClientStore.avatarThumbnail(mxcUrl:)`, not just an initials placeholder.
+    let avatarUrl: String?
 }
 
 /// One message in a room's timeline -- `ChatTimelineHandle`'s output shape.
@@ -25,6 +29,8 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     /// cluster incoming messages by sender in group rooms.
     let senderId: String?
     let senderDisplayName: String?
+    /// `mxc://` sender avatar from the same `senderProfile`, nil for `isOwn` messages.
+    let senderAvatarUrl: String?
 }
 
 /// One other member of a room, display-ready -- `MatrixClientStore.roomInfo()`'s member list.

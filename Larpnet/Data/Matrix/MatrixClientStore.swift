@@ -111,11 +111,30 @@ final class MatrixClientStore {
             let name = await displayName(for: room)
             let (previewText, timestamp) = await preview(for: room)
             let unreadCount = (try? await room.roomInfo().numUnreadMessages).map(Int.init) ?? 0
+            let avatarUrl = await avatarUrl(for: room)
             result.append(ChatRoom(
-                id: room.id(), name: name, preview: previewText, timestamp: timestamp, unreadCount: unreadCount
+                id: room.id(), name: name, preview: previewText, timestamp: timestamp,
+                unreadCount: unreadCount, avatarUrl: avatarUrl
             ))
         }
         return result.sorted { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }
+    }
+
+    /// Real room avatar, same hero-fallback shape as `displayName(for:)`: for a 1:1 DM, the
+    /// room itself rarely has its own avatar set, so fall back to the other person's.
+    private func avatarUrl(for room: Room) async -> String? {
+        if let url = room.avatarUrl() { return url }
+        let heroes = await room.heroes()
+        return heroes.count == 1 ? heroes[0].avatarUrl : nil
+    }
+
+    /// Fetches a real avatar image's bytes for a `mxc://` URL (a sender's or room's) -- callers
+    /// decode this into a `UIImage` and cache it themselves (see `MatrixAvatarView`); this layer
+    /// only knows how to talk to the SDK's media loader, not about SwiftUI/caching.
+    func avatarThumbnail(mxcUrl: String, size: Int = 96) async throws -> Data {
+        let client = try await ensureClient()
+        let source = try MediaSource.fromUrl(url: mxcUrl)
+        return try await client.getMediaThumbnail(mediaSource: source, width: UInt64(size), height: UInt64(size))
     }
 
     /// Finds the existing 1:1 room with this nickname, or creates one -- same "1:1 == exactly
@@ -144,7 +163,14 @@ final class MatrixClientStore {
         let client = try await ensureClient()
         guard let room = try client.getRoom(roomId: roomId) else { throw MatrixError.roomNotFound }
         let timeline = try await room.timeline()
-        let handle = ChatTimelineHandle(timeline: timeline)
+        // Same Friendica-name-first resolution the room list uses (`resolvedName`, via
+        // `displayName(for:)`) -- without this, a per-message sender falls back straight to
+        // their bare mxid localpart whenever they haven't set a Matrix displayname yet (the
+        // common case for anyone who's never opened chat themselves), instead of the full name
+        // the room list already knows how to show.
+        let handle = ChatTimelineHandle(timeline: timeline) { [weak self] userId, fallbackDisplayName in
+            self?.resolvedName(userId: userId, fallbackDisplayName: fallbackDisplayName) ?? (fallbackDisplayName ?? userId)
+        }
         await handle.start()
         return handle
     }
@@ -439,13 +465,18 @@ final class MatrixClientStore {
 @MainActor
 final class ChatTimelineHandle {
     private let timeline: Timeline
+    /// Friendica-name-first resolution for a sender, same as the room list's `resolvedName` --
+    /// injected rather than duplicated so this stays in sync with `MatrixClientStore`'s own
+    /// `contactsByLocalpart` lookup (see `openTimeline`'s call site).
+    private let resolveDisplayName: (String, String?) -> String
     private var listenerHandle: TaskHandle?
     private var items: [TimelineItem] = []
     private let continuation: AsyncStream<[ChatMessage]>.Continuation
     let messages: AsyncStream<[ChatMessage]>
 
-    init(timeline: Timeline) {
+    init(timeline: Timeline, resolveDisplayName: @escaping (String, String?) -> String) {
         self.timeline = timeline
+        self.resolveDisplayName = resolveDisplayName
         var continuation: AsyncStream<[ChatMessage]>.Continuation!
         self.messages = AsyncStream { continuation = $0 }
         self.continuation = continuation
@@ -486,10 +517,10 @@ final class ChatTimelineHandle {
             case .reset(let values): items = values
             }
         }
-        continuation.yield(items.compactMap(Self.chatMessage(from:)))
+        continuation.yield(items.compactMap { self.chatMessage(from: $0) })
     }
 
-    private static func chatMessage(from item: TimelineItem) -> ChatMessage? {
+    private func chatMessage(from item: TimelineItem) -> ChatMessage? {
         guard let event = item.asEvent(), case .msgLike(let msgLike) = event.content else { return nil }
         let body: String
         switch msgLike.kind {
@@ -498,16 +529,18 @@ final class ChatTimelineHandle {
         case .redacted: return nil
         default: return nil
         }
-        var senderDisplayName: String?
-        if case .ready(let displayName, _, _, _, _) = event.senderProfile, let displayName, !displayName.isEmpty {
-            senderDisplayName = displayName
+        var sdkDisplayName: String?
+        var avatarUrl: String?
+        if case .ready(let displayName, _, let profileAvatarUrl, _, _) = event.senderProfile {
+            sdkDisplayName = displayName?.isEmpty == false ? displayName : nil
+            avatarUrl = profileAvatarUrl
         }
         return ChatMessage(
             id: item.uniqueId().id, isOwn: event.isOwn, body: body,
             timestamp: Date(timeIntervalSince1970: Double(event.timestamp) / 1000),
             senderId: event.isOwn ? nil : event.sender,
-            senderDisplayName: event.isOwn
-                ? nil : (senderDisplayName ?? MatrixClientStore.localpart(of: event.sender) ?? event.sender)
+            senderDisplayName: event.isOwn ? nil : resolveDisplayName(event.sender, sdkDisplayName),
+            senderAvatarUrl: event.isOwn ? nil : avatarUrl
         )
     }
 }
