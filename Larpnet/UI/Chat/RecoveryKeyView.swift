@@ -38,9 +38,9 @@ struct RecoveryKeyView: View {
 
     private var title: String {
         switch viewModel.mode {
-        case .setup: return "Ustaw klucz odzyskiwania"
-        case .reset: return "Resetuj klucz odzyskiwania"
-        case .restore: return "Odblokuj historię czatu"
+        case .setup: return "Set up recovery key"
+        case .reset: return "Reset recovery key"
+        case .restore: return "Unlock chat history"
         }
     }
 
@@ -50,8 +50,8 @@ struct RecoveryKeyView: View {
             Section {
                 Text(
                     viewModel.mode == .reset
-                        ? "Stary klucz przestanie działać. Wybierz nowy -- losowy albo własną frazę."
-                        : "Ten klucz pozwala odczytać historię czatu na nowym urządzeniu. Możesz wygenerować losowy klucz albo ustawić własną, łatwą do zapamiętania frazę."
+                        ? "Your old key will stop working. Choose a new one -- random or your own phrase."
+                        : "This key lets you read chat history on a new device. You can generate a random key or set your own, memorable phrase."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -63,14 +63,14 @@ struct RecoveryKeyView: View {
                     if viewModel.isBusy {
                         ProgressView()
                     } else {
-                        Text("Wygeneruj losowy klucz")
+                        Text("Generate a random key")
                     }
                 }
                 .disabled(viewModel.isBusy)
             }
-            Section("Albo wpisz własną frazę") {
-                TextField("Fraza…", text: $viewModel.passphraseInput)
-                Button("Ustaw frazę") { Task { await viewModel.choosePassphrase() } }
+            Section("Or enter your own phrase") {
+                TextField("Passphrase…", text: $viewModel.passphraseInput)
+                Button("Set phrase") { Task { await viewModel.choosePassphrase() } }
                     .disabled(viewModel.isBusy || viewModel.passphraseInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if let errorMessage = viewModel.errorMessage {
@@ -84,9 +84,9 @@ struct RecoveryKeyView: View {
         Form {
             Section {
                 Text(
-                    "Zapisz go w bezpiecznym miejscu (np. menedżerze haseł) -- nikt inny, w tym " +
-                    "administrator serwera, go nie zna i nie może go odzyskać. Jeśli ustawiłeś/-aś " +
-                    "własną frazę, możesz użyć jej zamiast tego klucza na innym urządzeniu."
+                    "Save it somewhere safe (e.g. a password manager) -- no one else, including " +
+                    "the server administrator, knows it or can recover it. If you set your own " +
+                    "phrase, you can use that instead of this key on another device."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -95,7 +95,7 @@ struct RecoveryKeyView: View {
                 Text(key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
             }
             Section {
-                Button("Zapisałem/-am klucz", action: onDone)
+                Button("I've saved the key", action: onDone)
             }
         }
     }
@@ -105,15 +105,15 @@ struct RecoveryKeyView: View {
         Form {
             Section {
                 Text(
-                    "To nowe urządzenie -- wpisz swój klucz odzyskiwania (albo frazę, jeśli taką " +
-                    "ustawiłeś/-aś), aby odczytać wcześniejsze wiadomości. Możesz to zrobić później " +
-                    "-- nowe wiadomości będą działać już teraz."
+                    "This is a new device -- enter your recovery key (or phrase, if you set one) " +
+                    "to read earlier messages. You can do this later -- new messages will work " +
+                    "already."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             }
             Section {
-                TextField("Klucz odzyskiwania lub fraza…", text: $viewModel.restoreInput)
+                TextField("Recovery key or phrase…", text: $viewModel.restoreInput)
                 if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage).foregroundStyle(.red)
                 }
@@ -125,12 +125,12 @@ struct RecoveryKeyView: View {
                     if viewModel.isBusy {
                         ProgressView()
                     } else {
-                        Text("Odblokuj")
+                        Text("Unlock")
                     }
                 }
                 .disabled(viewModel.isBusy || viewModel.restoreInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if let onSkip {
-                    Button("Później", action: onSkip)
+                    Button("Later", action: onSkip)
                 }
             }
         }

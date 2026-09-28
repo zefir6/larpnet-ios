@@ -19,6 +19,10 @@ final class ChatThreadViewModel {
     private(set) var roomName: String?
     private(set) var roomId: String?
     private(set) var messages: [ChatMessage] = []
+    /// Whether this room has more than one other member -- drives whether message clusters show
+    /// a sender avatar/name (group chats only; a 1:1's incoming sender is already obvious from
+    /// the room itself).
+    private(set) var isGroup = false
     private(set) var isLoading = false
     private(set) var isSending = false
     var draft: String = ""
@@ -48,6 +52,7 @@ final class ChatThreadViewModel {
                 resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(nickname: nickname)
             }
             roomId = resolvedRoomId
+            isGroup = (try? await appContainer.matrixClientStore.roomInfo(roomId: resolvedRoomId).isGroup) ?? false
             let newHandle = try await appContainer.matrixClientStore.openTimeline(roomId: resolvedRoomId)
             handle = newHandle
             messagesTask = Task { [weak self] in
