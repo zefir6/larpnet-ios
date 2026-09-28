@@ -115,17 +115,17 @@ struct SettingsView: View {
             }
 
             Section("Chat") {
-                Button("Resetuj klucz odzyskiwania", role: .destructive) {
+                Button("Reset recovery key", role: .destructive) {
                     showResetRecoveryConfirm = true
                 }
             }
             .confirmationDialog(
-                "To usunie dostęp do historii czatu za pomocą starego klucza na nowych urządzeniach. Tej operacji nie można odwrócić.",
+                "This will remove access to chat history using the old key on new devices. This action cannot be undone.",
                 isPresented: $showResetRecoveryConfirm,
                 titleVisibility: .visible
             ) {
-                Button("Resetuj", role: .destructive) { showResetRecoverySheet = true }
-                Button("Anuluj", role: .cancel) {}
+                Button("Reset", role: .destructive) { showResetRecoverySheet = true }
+                Button("Cancel", role: .cancel) {}
             }
             .sheet(isPresented: $showResetRecoverySheet) {
                 RecoveryKeyView(mode: .reset, appContainer: appContainer, onDone: { showResetRecoverySheet = false })

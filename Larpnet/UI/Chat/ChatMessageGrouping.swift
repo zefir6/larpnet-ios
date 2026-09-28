@@ -15,6 +15,7 @@ struct ChatMessageGrouping {
         let isOwn: Bool
         let senderId: String?
         let senderDisplayName: String?
+        let senderAvatarUrl: String?
         let messages: [ChatMessage]
     }
 
@@ -66,12 +67,14 @@ struct ChatMessageGrouping {
                message.timestamp.timeIntervalSince(lastTimestamp) <= clusterWindow {
                 clusters[clusters.count - 1] = Cluster(
                     id: last.id, isOwn: last.isOwn, senderId: last.senderId,
-                    senderDisplayName: last.senderDisplayName, messages: last.messages + [message]
+                    senderDisplayName: last.senderDisplayName, senderAvatarUrl: last.senderAvatarUrl,
+                    messages: last.messages + [message]
                 )
             } else {
                 clusters.append(Cluster(
                     id: message.id, isOwn: message.isOwn, senderId: message.senderId,
-                    senderDisplayName: message.senderDisplayName, messages: [message]
+                    senderDisplayName: message.senderDisplayName, senderAvatarUrl: message.senderAvatarUrl,
+                    messages: [message]
                 ))
             }
         }

@@ -4,12 +4,14 @@ struct ChatThreadView: View {
     @State private var viewModel: ChatThreadViewModel
     @State private var isAtBottom = true
     @State private var pendingNewMessages = 0
+    private let appContainer: AppContainer
     let onOpenInfo: (String) -> Void
 
     private static let bottomAnchorId = "chat-bottom-anchor"
 
     init(target: ChatThreadTarget, appContainer: AppContainer, onOpenInfo: @escaping (String) -> Void) {
         _viewModel = State(initialValue: ChatThreadViewModel(target: target, appContainer: appContainer))
+        self.appContainer = appContainer
         self.onOpenInfo = onOpenInfo
     }
 
@@ -106,7 +108,10 @@ struct ChatThreadView: View {
         HStack(alignment: .bottom, spacing: 8) {
             if !cluster.isOwn {
                 if viewModel.isGroup {
-                    InitialsAvatar(name: cluster.senderDisplayName ?? "?", size: 28)
+                    MatrixAvatarView(
+                        avatarUrl: cluster.senderAvatarUrl, name: cluster.senderDisplayName ?? "?",
+                        size: 28, appContainer: appContainer
+                    )
                 } else {
                     Color.clear.frame(width: 28, height: 28)
                 }

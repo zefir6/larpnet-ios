@@ -19,7 +19,7 @@ struct ChatView: View {
                 Button {
                     onOpenRoom(room)
                 } label: {
-                    ChatRoomRow(room: room)
+                    ChatRoomRow(room: room, appContainer: appContainer)
                 }
                 .buttonStyle(.plain)
             }
@@ -73,12 +73,13 @@ struct ChatView: View {
 /// two-line text row.
 private struct ChatRoomRow: View {
     let room: ChatRoom
+    let appContainer: AppContainer
 
     private var hasUnread: Bool { room.unreadCount > 0 }
 
     var body: some View {
         HStack(spacing: 10) {
-            InitialsAvatar(name: room.name)
+            MatrixAvatarView(avatarUrl: room.avatarUrl, name: room.name, appContainer: appContainer)
             VStack(alignment: .leading, spacing: 2) {
                 Text(room.name).font(.body.weight(hasUnread ? .semibold : .medium)).lineLimit(1)
                 if let preview = room.preview {
