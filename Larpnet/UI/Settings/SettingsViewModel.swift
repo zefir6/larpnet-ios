@@ -48,6 +48,9 @@ final class SettingsViewModel {
             // `logout()` call -- this is only for "still logged in, just disabled push".
             if let pushkey = appContainer.tokenStore.apnsDeviceTokenHex {
                 Task { await appContainer.matrixClientStore.unregisterPusher(pushkey: pushkey) }
+                // Classic Friendica notifications' own registration (`larpnet_apns`, separate
+                // from the Matrix pusher above) needs the same unregister-without-logout case.
+                Task { try? await appContainer.friendicaAPI().unregisterApnsToken(pushkey) }
             }
         }
     }

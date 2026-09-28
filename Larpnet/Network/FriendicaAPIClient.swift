@@ -458,6 +458,22 @@ final class FriendicaAPIClient: Sendable {
         try await send(path: "larpnet_matrix", method: "POST")
     }
 
+    // MARK: - Classic notification push (APNs)
+
+    /// `POST /larpnet_apns` -- the `larpnet_apns` addon's device-token registration endpoint,
+    /// the iOS counterpart of Android's FCM registration. Separate from Matrix chat's own
+    /// pusher registration (`MatrixClientStore.registerPusher`, which talks to Synapse
+    /// directly) -- this is for classic Friendica notifications (likes, comments, follows,
+    /// DMs), which have no encryption/content restriction, so the real title/body goes
+    /// straight to Apple server-side.
+    func registerApnsToken(_ token: String) async throws {
+        _ = try await perform(buildFormRequest(path: "larpnet_apns", fields: ["token": token]))
+    }
+
+    func unregisterApnsToken(_ token: String) async throws {
+        _ = try await perform(buildFormRequest(path: "larpnet_apns", fields: ["token": token, "unregister": "1"]))
+    }
+
     // MARK: - Media
 
     /// Uploads the avatar via Friendica's legacy Twitter-compatible

@@ -17,10 +17,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         guard let appContainer else { return }
         // Cached regardless of pushEnabled/isLoggedIn below -- `SettingsViewModel.togglePush(false)`
         // needs this later to unregister, and there's no other way to get it back on demand.
-        appContainer.tokenStore.apnsDeviceTokenHex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        let hexToken = deviceToken.map { String(format: "%02x", $0) }.joined()
+        appContainer.tokenStore.apnsDeviceTokenHex = hexToken
         guard appContainer.tokenStore.isLoggedIn, appContainer.tokenStore.pushEnabled else { return }
         Task {
             await appContainer.matrixClientStore.registerPusher(deviceToken: deviceToken)
+        }
+        // Classic Friendica notifications (likes/comments/follows/DMs) -- a separate
+        // registration from the Matrix pusher above, same one APNs device token but a
+        // different server-side addon (`larpnet_apns`, not `larpnet_matrix`/Synapse).
+        // Best-effort: a failure here (e.g. logged out, transient network error) just means
+        // this device stays on `BackgroundRefresh`'s polling fallback for classic
+        // notifications until the next successful registration attempt.
+        Task {
+            try? await appContainer.friendicaAPI().registerApnsToken(hexToken)
         }
     }
 
