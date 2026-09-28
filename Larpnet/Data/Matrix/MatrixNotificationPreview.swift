@@ -21,7 +21,7 @@ enum MatrixNotificationPreview {
         let messageBody: String?
         switch item.event {
         case .invite:
-            messageBody = "Zaproszenie do rozmowy"
+            messageBody = "Chat invitation"
         case .timeline(let event):
             messageBody = bodyFor(content: try? event.content())
         }
@@ -36,11 +36,11 @@ enum MatrixNotificationPreview {
         case .roomMessage(let messageType, _):
             switch messageType {
             case .text(let content): return content.body
-            case .image: return "📷 Zdjęcie"
-            case .file: return "📎 Plik"
-            case .audio: return "🎤 Nagranie"
-            case .video: return "🎬 Wideo"
-            default: return "Nowa wiadomość"
+            case .image: return "📷 Photo"
+            case .file: return "📎 File"
+            case .audio: return "🎤 Voice message"
+            case .video: return "🎬 Video"
+            default: return "New message"
             }
         case .roomEncrypted:
             return "🔒"

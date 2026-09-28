@@ -30,6 +30,7 @@ struct RootView: View {
                 tabContent(for: destination)
                     .tabItem { Label(destination.label, systemImage: destination.systemImage) }
                     .tag(destination)
+                    .badge(destination == .chat ? appContainer.chatBadgeStore.totalUnreadCount : 0)
             }
         }
         .tint(LarpnetTheme.accent)

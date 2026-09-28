@@ -50,7 +50,7 @@ final class RecoveryKeyViewModel {
             errorMessage = nil
             restoreSucceeded = true
         } catch {
-            errorMessage = "Nieprawidłowy klucz lub fraza."
+            errorMessage = "Invalid key or phrase."
         }
     }
 

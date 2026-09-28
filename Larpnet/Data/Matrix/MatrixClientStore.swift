@@ -110,7 +110,10 @@ final class MatrixClientStore {
         for room in client.rooms() where room.membership() == .joined {
             let name = await displayName(for: room)
             let (previewText, timestamp) = await preview(for: room)
-            result.append(ChatRoom(id: room.id(), name: name, preview: previewText, timestamp: timestamp))
+            let unreadCount = (try? await room.roomInfo().numUnreadMessages).map(Int.init) ?? 0
+            result.append(ChatRoom(
+                id: room.id(), name: name, preview: previewText, timestamp: timestamp, unreadCount: unreadCount
+            ))
         }
         return result.sorted { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }
     }
@@ -372,7 +375,7 @@ final class MatrixClientStore {
         return String(mxid[mxid.index(after: colonIndex)...])
     }
 
-    private nonisolated static func localpart(of mxid: String) -> String? {
+    fileprivate nonisolated static func localpart(of mxid: String) -> String? {
         guard mxid.hasPrefix("@"), let colonIndex = mxid.firstIndex(of: ":") else { return nil }
         return String(mxid[mxid.index(after: mxid.startIndex)..<colonIndex]).lowercased()
     }
@@ -387,7 +390,7 @@ final class MatrixClientStore {
             return resolvedName(userId: heroes[0].userId, fallbackDisplayName: heroes[0].displayName)
         }
         if let name = room.displayName(), !name.isEmpty { return name }
-        return "Rozmowa"
+        return "Chat"
     }
 
     /// Shared by the room-list hero name above and `roomInfo()`'s member list: prefer the
@@ -495,9 +498,16 @@ final class ChatTimelineHandle {
         case .redacted: return nil
         default: return nil
         }
+        var senderDisplayName: String?
+        if case .ready(let displayName, _, _, _, _) = event.senderProfile, let displayName, !displayName.isEmpty {
+            senderDisplayName = displayName
+        }
         return ChatMessage(
             id: item.uniqueId().id, isOwn: event.isOwn, body: body,
-            timestamp: Date(timeIntervalSince1970: Double(event.timestamp) / 1000)
+            timestamp: Date(timeIntervalSince1970: Double(event.timestamp) / 1000),
+            senderId: event.isOwn ? nil : event.sender,
+            senderDisplayName: event.isOwn
+                ? nil : (senderDisplayName ?? MatrixClientStore.localpart(of: event.sender) ?? event.sender)
         )
     }
 }

@@ -18,6 +18,7 @@ final class AppContainer: @unchecked Sendable {
     lazy var followedThreadsStore = FollowedThreadsStore(tokenStore: tokenStore)
     lazy var currentAccountStore = CurrentAccountStore(tokenStore: tokenStore)
     lazy var matrixClientStore = MatrixClientStore(tokenStore: tokenStore, friendicaAPI: { try self.friendicaAPI() })
+    lazy var chatBadgeStore = ChatBadgeStore()
 
     /// larpnet.pl sits behind Cloudflare, whose WAF blocks requests carrying a generic
     /// HTTP-library User-Agent with a 403 -- confirmed live (`curl` default UA -> 403,

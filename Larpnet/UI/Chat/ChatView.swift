@@ -74,20 +74,32 @@ struct ChatView: View {
 private struct ChatRoomRow: View {
     let room: ChatRoom
 
+    private var hasUnread: Bool { room.unreadCount > 0 }
+
     var body: some View {
         HStack(spacing: 10) {
             InitialsAvatar(name: room.name)
             VStack(alignment: .leading, spacing: 2) {
-                Text(room.name).font(.body.weight(.medium)).lineLimit(1)
+                Text(room.name).font(.body.weight(hasUnread ? .semibold : .medium)).lineLimit(1)
                 if let preview = room.preview {
                     Text(preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
-            if let timestamp = room.timestamp {
-                Text(RelativeTime.short(from: timestamp))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 4) {
+                if let timestamp = room.timestamp {
+                    Text(RelativeTime.short(from: timestamp))
+                        .font(.caption)
+                        .foregroundStyle(hasUnread ? LarpnetTheme.accent : .secondary)
+                }
+                if hasUnread {
+                    Text(room.unreadCount > 99 ? "99+" : "\(room.unreadCount)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(LarpnetTheme.accent, in: Capsule())
+                }
             }
         }
     }

@@ -18,8 +18,8 @@ struct ChatRoomInfoView: View {
         List {
             if viewModel.isGroup {
                 Section {
-                    TextField("Nazwa rozmowy", text: $viewModel.nameInput)
-                    Button("Zapisz") { Task { await viewModel.rename() } }
+                    TextField("Chat name", text: $viewModel.nameInput)
+                    Button("Save") { Task { await viewModel.rename() } }
                         .disabled(
                             viewModel.isBusy
                                 || viewModel.nameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -27,28 +27,28 @@ struct ChatRoomInfoView: View {
                         )
                 }
             }
-            Section("Uczestnicy") {
+            Section("Participants") {
                 ForEach(viewModel.members) { member in
                     HStack {
                         Text(member.displayName)
                         Spacer()
-                        Button("Usuń", role: .destructive) {
+                        Button("Remove", role: .destructive) {
                             Task { await viewModel.remove(userId: member.userId) }
                         }
                         .disabled(viewModel.isBusy)
                     }
                 }
-                Button("+ Dodaj osobę", action: onAddMember)
+                Button("+ Add person", action: onAddMember)
             }
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
             }
             Section {
-                Button("Opuść rozmowę", role: .destructive) { Task { await viewModel.leave() } }
+                Button("Leave chat", role: .destructive) { Task { await viewModel.leave() } }
                     .disabled(viewModel.isBusy)
             }
         }
-        .navigationTitle("Informacje o rozmowie")
+        .navigationTitle("Chat info")
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if viewModel.isLoading, viewModel.members.isEmpty { ProgressView() }

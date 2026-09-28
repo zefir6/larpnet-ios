@@ -37,6 +37,7 @@ final class ChatViewModel {
     func refresh() async {
         do {
             rooms = try await appContainer.matrixClientStore.rooms()
+            appContainer.chatBadgeStore.totalUnreadCount = rooms.reduce(0) { $0 + $1.unreadCount }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)

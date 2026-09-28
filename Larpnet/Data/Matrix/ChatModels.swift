@@ -9,6 +9,9 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     let name: String
     let preview: String?
     let timestamp: Date?
+    /// "Interesting" unread message count from `Room.roomInfo().numUnreadMessages` -- drives
+    /// the room row's unread styling and the Chat tab's badge total.
+    let unreadCount: Int
 }
 
 /// One message in a room's timeline -- `ChatTimelineHandle`'s output shape.
@@ -17,6 +20,11 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     let isOwn: Bool
     let body: String
     let timestamp: Date
+    /// Sender mxid and display name, from `EventTimelineItem.sender`/`senderProfile` -- nil for
+    /// `isOwn` messages (the composer already knows who "you" are). Used to attribute and
+    /// cluster incoming messages by sender in group rooms.
+    let senderId: String?
+    let senderDisplayName: String?
 }
 
 /// One other member of a room, display-ready -- `MatrixClientStore.roomInfo()`'s member list.
