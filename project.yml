@@ -99,8 +99,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: pl.larpnet.ios
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.21"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "1.22"
+        CURRENT_PROJECT_VERSION: "24"
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_EMIT_LOC_STRINGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -137,8 +137,8 @@ targets:
         PRODUCT_NAME: LarpnetNotificationServiceExtension
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_VERSION: "6.0"
-        MARKETING_VERSION: "1.21"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "1.22"
+        CURRENT_PROJECT_VERSION: "24"
         CODE_SIGN_ENTITLEMENTS: NotificationServiceExtension/NotificationServiceExtension.entitlements
 
   LarpnetTests:

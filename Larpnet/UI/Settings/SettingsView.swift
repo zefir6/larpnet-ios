@@ -55,15 +55,7 @@ struct SettingsView: View {
 
             Section {
                 ForEach(appContainer.navigationLayoutStore.bottomBar) { destination in
-                    Label(destination.label, systemImage: destination.systemImage)
-                        .swipeActions(edge: .trailing) {
-                            if appContainer.navigationLayoutStore.bottomBar.count > NavigationLayoutStore.minimumBottomBarCount {
-                                Button("Move to Menu") {
-                                    appContainer.navigationLayoutStore.moveToMenu(destination)
-                                }
-                                .tint(.blue)
-                            }
-                        }
+                    navigationRow(destination, in: .bottomBar)
                 }
                 .onMove { indices, newOffset in
                     var order = appContainer.navigationLayoutStore.bottomBar
@@ -76,20 +68,25 @@ struct SettingsView: View {
                 Text("At least \(NavigationLayoutStore.minimumBottomBarCount) must stay in the bottom bar.")
             }
 
-            Section("Top-left menu") {
-                ForEach(appContainer.navigationLayoutStore.menu) { destination in
-                    Label(destination.label, systemImage: destination.systemImage)
-                        .swipeActions(edge: .trailing) {
-                            Button("Move to Bottom Bar") {
-                                appContainer.navigationLayoutStore.moveToBottomBar(destination)
-                            }
-                            .tint(.blue)
-                        }
+            Section("Top-left bar") {
+                ForEach(appContainer.navigationLayoutStore.topBar) { destination in
+                    navigationRow(destination, in: .topBar)
                 }
                 .onMove { indices, newOffset in
-                    var order = appContainer.navigationLayoutStore.menu
+                    var order = appContainer.navigationLayoutStore.topBar
                     order.move(fromOffsets: indices, toOffset: newOffset)
-                    appContainer.navigationLayoutStore.setMenu(order)
+                    appContainer.navigationLayoutStore.setTopBar(order)
+                }
+            }
+
+            Section("More") {
+                ForEach(appContainer.navigationLayoutStore.more) { destination in
+                    navigationRow(destination, in: .more)
+                }
+                .onMove { indices, newOffset in
+                    var order = appContainer.navigationLayoutStore.more
+                    order.move(fromOffsets: indices, toOffset: newOffset)
+                    appContainer.navigationLayoutStore.setMore(order)
                 }
             }
 
@@ -191,5 +188,35 @@ struct SettingsView: View {
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
         }
         .task { await viewModel.load() }
+    }
+
+    /// One reorderable row, offering swipe actions to move `destination` into whichever of the
+    /// *other two* zones it isn't currently in (not just a single fixed target, since there are
+    /// now three zones instead of two). "Move to Bottom Bar" is suppressed once the bar is at
+    /// `NavigationLayoutStore.maximumBottomBarCount` (real `TabView` tab-overflow constraint, see
+    /// that constant's doc comment), and every option is suppressed for a bottom-bar row once the
+    /// bar is down to `minimumBottomBarCount` -- both mirror `move(_:to:)`'s own no-ops.
+    @ViewBuilder
+    private func navigationRow(_ destination: AppDestination, in zone: NavigationLayoutStore.Zone) -> some View {
+        let store = appContainer.navigationLayoutStore
+        let atBottomBarFloor = zone == .bottomBar && store.bottomBar.count <= NavigationLayoutStore.minimumBottomBarCount
+        let bottomBarFull = store.bottomBar.count >= NavigationLayoutStore.maximumBottomBarCount
+        Label(destination.label, systemImage: destination.systemImage)
+            .swipeActions(edge: .trailing) {
+                if !atBottomBarFloor {
+                    if zone != .bottomBar, !bottomBarFull {
+                        Button("Move to Bottom Bar") { store.move(destination, to: .bottomBar) }
+                            .tint(.blue)
+                    }
+                    if zone != .topBar {
+                        Button("Move to Top Bar") { store.move(destination, to: .topBar) }
+                            .tint(.blue)
+                    }
+                    if zone != .more {
+                        Button("Move to More") { store.move(destination, to: .more) }
+                            .tint(.gray)
+                    }
+                }
+            }
     }
 }
