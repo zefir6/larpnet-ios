@@ -22,6 +22,7 @@ struct RootView: View {
     @State private var mediaPath: [AppRoute] = []
     @State private var contactsPath: [AppRoute] = []
     @State private var chatPath: [AppRoute] = []
+    @State private var morePath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
 
     var body: some View {
@@ -32,6 +33,11 @@ struct RootView: View {
                     .tag(destination)
                     .badge(destination == .chat ? appContainer.chatBadgeStore.totalUnreadCount : 0)
             }
+            // Fixed last tab, bottom-right -- not itself reassignable to another zone, always
+            // the catch-all for whatever destinations aren't in the bottom bar or top bar.
+            tabStack(path: $morePath) { moreContent }
+                .tabItem { Label("More", systemImage: "ellipsis.circle") }
+                .tag("more")
         }
         .tint(LarpnetTheme.accent)
         .sheet(item: $composeContext) { context in
@@ -173,16 +179,80 @@ struct RootView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(appContainer.navigationLayoutStore.menu) { d in
-                        Button(d.label, systemImage: d.systemImage) {
-                            path.wrappedValue.append(.destination(d))
+            if !appContainer.navigationLayoutStore.topBar.isEmpty {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        ForEach(appContainer.navigationLayoutStore.topBar) { d in
+                            Button(d.label, systemImage: d.systemImage) {
+                                path.wrappedValue.append(.destination(d))
+                            }
                         }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
                     }
-                } label: {
-                    Image(systemName: "line.3.horizontal")
+                    // Explicit, not left to `.toolbarColorScheme(.dark)`'s automatic tinting --
+                    // confirmed live that a *lone* toolbar button (nothing else sharing its
+                    // placement) renders with a low-contrast glass fill under the global
+                    // `.tint(LarpnetTheme.accent)` (`RootView.body`'s `TabView`), while a
+                    // placement with 2+ grouped buttons renders crisp white. Since which
+                    // screens have a second trailing button varies per destination, pinning
+                    // white here keeps every screen legible instead of only the ones that
+                    // happen to have company.
+                    .tint(.white)
                 }
+            }
+            // Fixed, not customizable -- Notifications is frequent/time-sensitive enough to
+            // deserve a guaranteed spot on every screen rather than competing for bar space
+            // (see `AppDestination.customizableCases`). Suppressed on Notifications itself --
+            // no point pushing a second copy of the screen you're already on.
+            if destination != .notifications {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { path.wrappedValue.append(.destination(.notifications)) } label: {
+                        Image(systemName: "bell")
+                    }
+                    .tint(.white)
+                }
+            }
+        }
+    }
+
+    /// The bottom-right "More" tab's root -- everything not currently in the bottom bar or the
+    /// top-left bar, reached the same way the old top-left menu reached its items (pushing
+    /// `.destination(d)` onto this tab's own stack).
+    @ViewBuilder
+    private var moreContent: some View {
+        List(appContainer.navigationLayoutStore.more) { destination in
+            Button {
+                morePath.append(.destination(destination))
+            } label: {
+                Label(destination.label, systemImage: destination.systemImage)
+            }
+        }
+        .navigationTitle("More")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Same shared toolbar as every other tab root (`destinationContent`'s trailing
+            // `.toolbar` below) -- duplicated here rather than routed through that function
+            // since this tab's root is a plain list, not one of `AppDestination`'s cases.
+            if !appContainer.navigationLayoutStore.topBar.isEmpty {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        ForEach(appContainer.navigationLayoutStore.topBar) { d in
+                            Button(d.label, systemImage: d.systemImage) {
+                                morePath.append(.destination(d))
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                    }
+                    .tint(.white)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { morePath.append(.destination(.notifications)) } label: {
+                    Image(systemName: "bell")
+                }
+                .tint(.white)
             }
         }
     }
