@@ -1,12 +1,16 @@
 import Foundation
 
 /// Either an already-known room (opened from the room list, which already has its display
-/// name) or a bare Friendica nickname (opened from a profile's "Chat" button or the new-chat
-/// picker) -- `ChatThreadViewModel.load()` resolves the latter to a room id itself via
-/// `MatrixClientStore.openOrCreateDirectRoom()`, creating the room on first contact.
+/// name), a bare Friendica nickname (opened from a profile's "Chat" button or the new-chat
+/// picker), or an already-fully-qualified Matrix address typed directly (the new-chat picker's
+/// "enter a Matrix address" fallback -- works for a federated address on a different homeserver
+/// too, which the local-account search could never find) -- `ChatThreadViewModel.load()`
+/// resolves either of the latter two to a room id itself via `MatrixClientStore.
+/// openOrCreateDirectRoom()`, creating the room on first contact.
 enum ChatThreadTarget: Hashable {
     case room(id: String, name: String)
     case nickname(String)
+    case matrixId(String)
 }
 
 /// Direct port of `ConversationThreadViewModel`'s shape for native Matrix chat: loads a room's
@@ -50,6 +54,9 @@ final class ChatThreadViewModel {
             case .nickname(let nickname):
                 roomName = nickname
                 resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(nickname: nickname)
+            case .matrixId(let matrixId):
+                roomName = matrixId
+                resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(matrixId: matrixId)
             }
             roomId = resolvedRoomId
             isGroup = (try? await appContainer.matrixClientStore.roomInfo(roomId: resolvedRoomId).isGroup) ?? false
