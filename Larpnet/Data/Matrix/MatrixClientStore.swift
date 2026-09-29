@@ -144,9 +144,21 @@ final class MatrixClientStore {
     /// same division of responsibility as `larpnet_matrix_dm_localpart()`'s doc comment
     /// describes for the web client.
     func openOrCreateDirectRoom(nickname: String) async throws -> String {
-        let client = try await ensureClient()
         guard let serverName else { throw MatrixError.malformedIdentity }
-        let targetMxid = "@\(nickname.lowercased()):\(serverName)"
+        return try await openOrCreateDirectRoom(targetMxid: "@\(nickname.lowercased()):\(serverName)")
+    }
+
+    /// Same as above, but for an already-fully-qualified mxid rather than a bare local
+    /// nickname -- the new-chat picker's "enter a Matrix address" fallback, for someone who
+    /// already knows the exact address (including on a different, federated homeserver, which
+    /// the local-account search could never find in the first place).
+    func openOrCreateDirectRoom(matrixId: String) async throws -> String {
+        guard matrixId.hasPrefix("@"), matrixId.contains(":") else { throw MatrixError.malformedIdentity }
+        return try await openOrCreateDirectRoom(targetMxid: matrixId)
+    }
+
+    private func openOrCreateDirectRoom(targetMxid: String) async throws -> String {
+        let client = try await ensureClient()
 
         if let existing = try client.getDmRoom(userId: targetMxid) {
             return existing.id()

@@ -256,10 +256,15 @@ struct RootView: View {
                                 path.wrappedValue.removeLast()
                                 // Matrix identities only exist for local users (see
                                 // `larpnet_matrix_localpart()`) -- `username`, not `acct`, is
-                                // the Friendica nickname; a remote pick fails visibly via
-                                // `errorMessage` rather than silently, same as any other
-                                // not-actually-chattable target would.
+                                // the Friendica nickname. `chatRecipientMode` below already
+                                // filters results to local accounts only, so this is never a
+                                // not-actually-chattable remote pick.
                                 path.wrappedValue.append(.chatThread(.nickname(account.username)))
+                            },
+                            chatRecipientMode: true,
+                            onEnterMatrixAddress: { address in
+                                path.wrappedValue.removeLast()
+                                path.wrappedValue.append(.chatThread(.matrixId(address)))
                             }
                         )
                     case .chatThread(let target):
@@ -284,7 +289,8 @@ struct RootView: View {
                                     )
                                     await MainActor.run { path.wrappedValue.removeLast() }
                                 }
-                            }
+                            },
+                            chatRecipientMode: true
                         )
                     case .blockedAccounts:
                         BlockedAccountsView(appContainer: appContainer)
