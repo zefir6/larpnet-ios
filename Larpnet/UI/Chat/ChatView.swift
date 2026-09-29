@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
+    @State private var pendingLeaveRoom: ChatRoom?
     private let appContainer: AppContainer
     let onOpenRoom: (ChatRoom) -> Void
     let onNewChat: () -> Void
@@ -22,11 +23,29 @@ struct ChatView: View {
                     ChatRoomRow(room: room, appContainer: appContainer)
                 }
                 .buttonStyle(.plain)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) { pendingLeaveRoom = room } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(LarpnetTheme.pageBackground)
+        .confirmationDialog(
+            "Delete this conversation? You'll stop receiving its messages, and starting a new one with the same person begins a fresh conversation.",
+            isPresented: Binding(get: { pendingLeaveRoom != nil }, set: { if !$0 { pendingLeaveRoom = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let room = pendingLeaveRoom {
+                    Task { await viewModel.leaveRoom(room) }
+                }
+                pendingLeaveRoom = nil
+            }
+            Button("Cancel", role: .cancel) { pendingLeaveRoom = nil }
+        }
         .overlay {
             if viewModel.isLoading, viewModel.rooms.isEmpty {
                 ProgressView()
