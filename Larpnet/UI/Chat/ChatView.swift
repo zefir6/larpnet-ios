@@ -38,7 +38,11 @@ struct ChatView: View {
         .navigationTitle("Chat")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onNewChat) { Image(systemName: "square.and.pencil") }
+                // Deliberately not "square.and.pencil" -- that's the exact icon Home/Local use
+                // for "new post" in the same top-right toolbar spot, which is easy to confuse
+                // with "new chat" when switching tabs. "plus.bubble" reads unambiguously as
+                // starting a new conversation instead.
+                Button(action: onNewChat) { Image(systemName: "plus.bubble") }
             }
         }
         .task { await viewModel.loadInitial() }
