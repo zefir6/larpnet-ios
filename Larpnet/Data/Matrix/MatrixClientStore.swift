@@ -283,17 +283,24 @@ final class MatrixClientStore {
     /// state (a fresh secret-storage key/backup version) via the same path `setUpRecovery()`
     /// already uses.
     ///
-    /// Only calls `disableRecovery()` when recovery is actually currently `.enabled` --
-    /// confirmed live that calling it on an account that never set up recovery/backups throws
+    /// Skips `disableRecovery()` only when recovery is `.disabled` (never set up at all) --
+    /// confirmed live that calling it on an account in that state throws
     /// `ClientError.Generic(msg: "backups are not enabled", details: "BackupNotEnabled")`
     /// (`Recovery.disable()`'s first step is `backups().disable()`, which requires a backup to
     /// already exist). The Settings screen offers this button unconditionally, so this has to
     /// tolerate "there's nothing to disable yet" and just enable fresh recovery in that case --
     /// functionally the same outcome `setUpRecovery()` would give.
+    ///
+    /// `.incomplete` (recovery/backup exists server-side, e.g. set up on another device, but
+    /// this device hasn't unlocked it) still needs the `disableRecovery()` call -- a backup
+    /// *does* already exist there too, just not one this device has restored. Confirmed live:
+    /// treating `.incomplete` the same as `.disabled` (skipping disable) instead throws
+    /// `ClientError.Generic(details: "BackupExistsOnServer")` from `enableRecovery()`, since it
+    /// refuses to create a new backup version over an existing, un-superseded one.
     func resetRecovery(passphrase: String?) async throws -> String {
         let client = try await ensureClient()
         let encryption = client.encryption()
-        if try await waitForRecoveryState() == .enabled {
+        if try await waitForRecoveryState() != .disabled {
             try await encryption.disableRecovery()
         }
         return try await encryption.enableRecovery(
