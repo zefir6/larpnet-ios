@@ -31,6 +31,11 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     let senderDisplayName: String?
     /// `mxc://` sender avatar from the same `senderProfile`, nil for `isOwn` messages.
     let senderAvatarUrl: String?
+    /// True for a message whose content the SDK couldn't decrypt (missing/not-yet-restored
+    /// room key -- see `MatrixClientStore.resetRecovery()`'s doc comment for the usual cause).
+    /// `ChatThreadView` renders this as a distinct inline note instead of a normal bubble;
+    /// `body` is empty and unused in this case.
+    let isUndecryptable: Bool
 }
 
 /// One other member of a room, display-ready -- `MatrixClientStore.roomInfo()`'s member list.

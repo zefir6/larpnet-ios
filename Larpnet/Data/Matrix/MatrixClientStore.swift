@@ -552,9 +552,10 @@ final class ChatTimelineHandle {
     private func chatMessage(from item: TimelineItem) -> ChatMessage? {
         guard let event = item.asEvent(), case .msgLike(let msgLike) = event.content else { return nil }
         let body: String
+        let isUndecryptable: Bool
         switch msgLike.kind {
-        case .message(let message): body = message.body
-        case .unableToDecrypt: body = "🔒"
+        case .message(let message): body = message.body; isUndecryptable = false
+        case .unableToDecrypt: body = ""; isUndecryptable = true
         case .redacted: return nil
         default: return nil
         }
@@ -569,7 +570,8 @@ final class ChatTimelineHandle {
             timestamp: Date(timeIntervalSince1970: Double(event.timestamp) / 1000),
             senderId: event.isOwn ? nil : event.sender,
             senderDisplayName: event.isOwn ? nil : resolveDisplayName(event.sender, sdkDisplayName),
-            senderAvatarUrl: event.isOwn ? nil : avatarUrl
+            senderAvatarUrl: event.isOwn ? nil : avatarUrl,
+            isUndecryptable: isUndecryptable
         )
     }
 }

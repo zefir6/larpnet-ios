@@ -133,12 +133,16 @@ struct ChatThreadView: View {
 
     @ViewBuilder
     private func messageBubble(_ message: ChatMessage, isOwn: Bool, isLastInCluster: Bool) -> some View {
-        let bubbleColor: Color = isOwn ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.15)
         VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
-            Text(message.body)
-                .padding(8)
-                .background(bubbleColor, in: RoundedRectangle(cornerRadius: 16))
-                .frame(maxWidth: 280, alignment: isOwn ? .trailing : .leading)
+            if message.isUndecryptable {
+                undecryptableNote
+            } else {
+                let bubbleColor: Color = isOwn ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.15)
+                Text(message.body)
+                    .padding(8)
+                    .background(bubbleColor, in: RoundedRectangle(cornerRadius: 16))
+                    .frame(maxWidth: 280, alignment: isOwn ? .trailing : .leading)
+            }
             if isLastInCluster {
                 Text(message.timestamp, style: .time)
                     .font(.caption2)
@@ -147,5 +151,16 @@ struct ChatThreadView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
+    }
+
+    /// Deliberately not a colored bubble like a real message -- a plain inline note (small,
+    /// secondary-colored, lock icon) reads as "this thread has a gap", not as content from the
+    /// sender. Shown per-message rather than hiding it outright: a silently missing message
+    /// would look like nothing was ever sent, which is worse than an visible, explained gap.
+    private var undecryptableNote: some View {
+        Label("Message couldn't be decrypted", systemImage: "lock.slash")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
     }
 }
