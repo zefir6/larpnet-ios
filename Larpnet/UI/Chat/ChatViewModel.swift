@@ -25,6 +25,7 @@ final class ChatViewModel {
         guard rooms.isEmpty else { return }
         isLoading = true
         defer { isLoading = false }
+        await appContainer.matrixClientStore.consolidateDuplicateDirectRooms()
         await refresh()
         subscribeToUpdates()
         recoveryPrompt = try? await appContainer.matrixClientStore.recoveryPromptKind()

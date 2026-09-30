@@ -124,6 +124,108 @@ final class MatrixClientStore {
         return result.sorted { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }
     }
 
+    /// Cleans up the leftover duplicate DM rooms from before `openOrCreateDirectRoom()`
+    /// reliably used `getDmRoom()`/`m.direct` -- same story as the web client's
+    /// `findOrCreateDirectRoom()` (see its doc comment in `matrix.js`): a client that fails to
+    /// find an existing DM creates a fresh one instead, and that duplicate is a real, separate
+    /// room on the server, not just a display glitch. Confirmed live on a real account: the
+    /// same contact had 4+ separate DM rooms, and which one a given client happened to open
+    /// depended on lookup order -- explaining reports like "this conversation is empty" on one
+    /// client while another shows real history for what looks like the same person.
+    ///
+    /// Run once per session, after login (see `ChatViewModel.loadInitial()`). For every
+    /// 1:1-shaped room (exactly one other member) grouped by that member: if more than one
+    /// room has a message, this is ambiguous (possibly two genuinely separate historical
+    /// conversations) -- leave them all alone, just repoint `m.direct` at whichever was most
+    /// recently active so new chats go to the right place. Otherwise the one room with a
+    /// message (or, if none have one, a deterministic pick by room ID) is canonical: point
+    /// `m.direct` at it and leave the empty duplicates, since a room with no messages has
+    /// nothing to lose by leaving it (the same action the room list's own swipe-to-delete
+    /// already performs on purpose).
+    func consolidateDuplicateDirectRooms() async {
+        guard let client = try? await ensureClient(), let selfId = try? client.userId() else { return }
+
+        var byTarget: [String: [Room]] = [:]
+        for room in client.rooms() where room.membership() == .joined || room.membership() == .invited {
+            guard let iterator = try? await room.members() else { continue }
+            var all: [RoomMember] = []
+            while let chunk = iterator.nextChunk(chunkSize: 10), !chunk.isEmpty {
+                all.append(contentsOf: chunk)
+            }
+            let active = all.filter { $0.membership == .join || $0.membership == .invite }
+            guard active.count == 2, let other = active.first(where: { $0.userId != selfId }) else { continue }
+            byTarget[other.userId, default: []].append(room)
+        }
+
+        for (targetMxid, roomsForTarget) in byTarget where roomsForTarget.count > 1 {
+            var withMessage: [Room] = []
+            for room in roomsForTarget where await hasMessageContent(room) {
+                withMessage.append(room)
+            }
+
+            let canonical: Room
+            var duplicatesToLeave: [Room] = []
+            if withMessage.count > 1 {
+                var best = withMessage[0]
+                var bestTimestamp = await lastActiveTimestamp(best)
+                for candidate in withMessage.dropFirst() {
+                    let candidateTimestamp = await lastActiveTimestamp(candidate)
+                    if (candidateTimestamp ?? .distantPast) > (bestTimestamp ?? .distantPast) {
+                        best = candidate
+                        bestTimestamp = candidateTimestamp
+                    }
+                }
+                canonical = best
+            } else if withMessage.count == 1 {
+                canonical = withMessage[0]
+                duplicatesToLeave = roomsForTarget.filter { $0.id() != canonical.id() }
+            } else {
+                let sorted = roomsForTarget.sorted { $0.id() < $1.id() }
+                canonical = sorted[0]
+                duplicatesToLeave = Array(sorted.dropFirst())
+            }
+
+            await setDirectRoomAccountData(client: client, targetMxid: targetMxid, roomId: canonical.id())
+
+            for dup in duplicatesToLeave {
+                try? await dup.leave()
+            }
+        }
+    }
+
+    private func hasMessageContent(_ room: Room) async -> Bool {
+        let content: TimelineItemContent
+        switch await room.latestEvent() {
+        case .remote(_, _, _, _, let c), .local(_, _, _, let c, _): content = c
+        case .none, .remoteInvite: return false
+        }
+        guard case .msgLike(let msgLike) = content else { return false }
+        switch msgLike.kind {
+        case .message, .unableToDecrypt: return true
+        default: return false
+        }
+    }
+
+    private func lastActiveTimestamp(_ room: Room) async -> Date? {
+        switch await room.latestEvent() {
+        case .remote(let timestamp, _, _, _, _), .local(let timestamp, _, _, _, _):
+            return Self.date(from: timestamp)
+        case .none, .remoteInvite:
+            return nil
+        }
+    }
+
+    /// Reads/writes `m.direct` directly (rather than going through `getDmRoom()`) since this is
+    /// specifically about *repairing* that mapping, not looking a room up through it.
+    private func setDirectRoomAccountData(client: Client, targetMxid: String, roomId: String) async {
+        let raw = (try? await client.accountData(eventType: "m.direct")) ?? nil
+        var direct = raw.flatMap { try? JSONDecoder().decode([String: [String]].self, from: Data($0.utf8)) } ?? [:]
+        guard direct[targetMxid] != [roomId] else { return }
+        direct[targetMxid] = [roomId]
+        guard let encoded = try? JSONEncoder().encode(direct), let json = String(data: encoded, encoding: .utf8) else { return }
+        try? await client.setAccountData(eventType: "m.direct", content: json)
+    }
+
     /// Real room avatar, same hero-fallback shape as `displayName(for:)`: for a 1:1 DM, the
     /// room itself rarely has its own avatar set, so fall back to the other person's.
     private func avatarUrl(for room: Room) async -> String? {

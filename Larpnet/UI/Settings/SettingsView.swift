@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @State private var showResetRecoveryConfirm = false
     @State private var showResetRecoverySheet = false
+    @State private var showRestoreRecoverySheet = false
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
 
@@ -111,7 +112,17 @@ struct SettingsView: View {
                 }
             }
 
+            // "Unlock chat history" is also auto-prompted right after login when needed (see
+            // `ChatView`'s `.sheet` on `recoveryPromptKind()`), but that check only runs once
+            // per app launch -- tapping "Later" there left no way back in for the rest of the
+            // session (confirmed live: a device stuck in this state shows every conversation as
+            // empty, "No messages yet", not just undecryptable placeholders, since the timeline
+            // never even gets the historical events without the key). This entry point re-opens
+            // the same flow on demand; safe to run even when already unlocked.
             Section("Chat") {
+                Button("Unlock chat history") {
+                    showRestoreRecoverySheet = true
+                }
                 Button("Reset recovery key", role: .destructive) {
                     showResetRecoveryConfirm = true
                 }
@@ -126,6 +137,13 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showResetRecoverySheet) {
                 RecoveryKeyView(mode: .reset, appContainer: appContainer, onDone: { showResetRecoverySheet = false })
+            }
+            .sheet(isPresented: $showRestoreRecoverySheet) {
+                RecoveryKeyView(
+                    mode: .restore, appContainer: appContainer,
+                    onDone: { showRestoreRecoverySheet = false },
+                    onSkip: { showRestoreRecoverySheet = false }
+                )
             }
 
             Section("Following") {
