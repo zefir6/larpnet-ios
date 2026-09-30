@@ -4,6 +4,10 @@ import MatrixRustSDK
 enum MatrixError: Error {
     case malformedIdentity
     case roomNotFound
+    case invalidHomeserverUrl
+    /// `deleteAllServerSideBackups()` gave up after `maxServerBackupDeleteAttempts` rounds --
+    /// see that function's doc comment. Carries the last-seen backup version id for debugging.
+    case tooManyServerSideBackups(lastVersion: String)
 }
 
 /// Owns the `MatrixRustSDK.Client` lifecycle for native chat -- see
@@ -282,69 +286,100 @@ final class MatrixClientStore {
     /// Resets recovery when the user has forgotten their key/phrase -- same scope as web's
     /// `resetRecovery()` (see its doc comment in `client/src/recovery.js`/the addon's
     /// `CLAUDE.md`): this is "let me set a new key", not a guarantee that a device which
-    /// already has the old keys locally loses access to old history. `resetRecoveryKey()`/
-    /// `recoverAndReset()` exist on this SDK but don't accept a passphrase -- a custom-
-    /// passphrase reset goes through disable-then-enable instead, which reaches the same end
-    /// state (a fresh secret-storage key/backup version) via the same path `setUpRecovery()`
-    /// already uses.
+    /// already has the old keys locally loses access to old history.
     ///
-    /// Always calls `disableRecovery()` first, unconditionally -- **not** gated on
-    /// `waitForRecoveryState()` (an earlier version tried that; see git history). That state is
-    /// reported by the SDK's own local cache, and confirmed live twice over, in both
-    /// directions, that it doesn't reliably match whether a server-side backup actually exists
-    /// at the moment this runs: trusting `.enabled`/`.incomplete` vs `.disabled` to decide
-    /// whether to disable first produced *both* `BackupNotEnabled` (disabled when nothing
-    /// existed) *and* `BackupExistsOnServer` (skipped disabling when something did) on
-    /// different attempts against the same account. Asking the SDK "does a backup exist" by
-    /// just trying to remove one, and only reacting to whether that specific call succeeds, is
-    /// the one source of truth that can't be stale.
+    /// **Does not use `Encryption.disableRecovery()` at all** -- two earlier versions of this
+    /// function did (gated on `waitForRecoveryState()`, then retried a few times), and both
+    /// were confirmed live to fail unreliably in different ways on the same account
+    /// (`BackupNotEnabled` and `BackupExistsOnServer`, on different attempts). Root cause, read
+    /// straight from the Rust source: `Backups::disable()` only deletes the *one* backup
+    /// version this device's **local crypto store** currently happens to know about
+    /// (`olm_machine.backup_machine().get_backup_keys()`); it never asks the server what
+    /// actually exists. If local knowledge is stale relative to the server -- plausible on any
+    /// account that's been through several earlier reset attempts, as this one was while this
+    /// bug was being tracked down -- disabling "succeeds" while an orphaned version remains on
+    /// the server, and the next `enableRecovery()` correctly refuses to overwrite it. Retrying
+    /// the same disable-then-enable pass doesn't fix a stale local cache; it just changes which
+    /// failure shows up.
     ///
-    /// So: always attempt `disableRecovery()`, and swallow exactly one specific failure --
-    /// `RecoveryError.Client(source: .Generic(details: "BackupNotEnabled"))`, meaning there was
-    /// truly nothing to disable (never set up at all) -- proceeding straight to
-    /// `enableRecovery()` in that case, same outcome `setUpRecovery()` would give. Any other
-    /// error (including a hypothetical `.BackupExistsOnServer` from this call, or a genuine
-    /// network failure) propagates normally; the Settings screen offers this button
-    /// unconditionally, so "nothing to disable yet" is the only case that's actually expected
-    /// rather than a real failure.
-    ///
-    /// Even so, confirmed live that a single disable-then-enable pass can still hit
-    /// `RecoveryError.BackupExistsOnServer` from `enableRecovery()` *right after* `disableRecovery()`
-    /// reported success. Read the Rust source (`Backups::disable()`) to understand why: it
-    /// deletes only the backup version *this device's local crypto store* currently knows
-    /// about (`olm_machine.backup_machine().get_backup_keys()`), while `enableRecovery()`'s
-    /// `BackupExistsOnServer` check asks the *server* fresh (`backups().fetch_exists_on_server()`).
-    /// Those two can disagree if this device's local record of the backup version is stale
-    /// relative to the server (plausible on this account specifically, after many manual reset
-    /// attempts earlier while this exact bug was being tracked down). The SDK's FFI surface
-    /// doesn't expose `Backups::disable_and_delete()` (the version that loops against the
-    /// server's *actual* current version instead of the local cache), so the best available
-    /// mitigation from here is retrying the full disable-then-enable pass a few times -- each
-    /// attempt re-reads local backup-key state fresh, which has a real chance of catching up
-    /// once whatever produced the mismatch (e.g. a background sync task) settles.
+    /// Fixed by copying the strategy **web's `matrix-js-sdk` already uses and never has this
+    /// problem with** (confirmed by reading its source, `rust-crypto/backup.js`'s
+    /// `deleteAllKeyBackupVersions()`): ask the *server* directly, in a loop -- "what's the
+    /// current backup version? delete it. ask again. repeat until there isn't one" -- rather
+    /// than trusting any local cache. The Rust SDK's equivalent (`Backups::disable_and_delete()`)
+    /// exists but was never exposed through this FFI, so `deleteAllServerSideBackups()` below
+    /// replicates it with plain authenticated HTTP calls using the session's own access token.
+    /// Once that loop completes, the server is *guaranteed* to have nothing left, and
+    /// `enableRecovery()` runs exactly the same proven-reliable "fresh account" path
+    /// `setUpRecovery()` already uses -- called once, no retry wrapper needed.
     func resetRecovery(passphrase: String?) async throws -> String {
         let client = try await ensureClient()
-        let encryption = client.encryption()
-        var lastError: Error?
-        for attempt in 0..<3 {
-            if attempt > 0 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+        try await deleteAllServerSideBackups()
+        return try await client.encryption().enableRecovery(
+            waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
+        )
+    }
+
+    private struct BackupVersionResponse: Decodable {
+        let version: String
+    }
+
+    /// Deletes every key-backup version this account has on the server, asking the server fresh
+    /// each time rather than trusting the SDK's local cache -- see `resetRecovery()`'s doc
+    /// comment for the full "why". Bypasses `Encryption`/`Backups` entirely via plain
+    /// authenticated Matrix Client-Server API calls, using the already-logged-in session's own
+    /// access token (`Client.session()`) against its own homeserver (`Client.homeserver()`) --
+    /// no new auth, just the same credentials the SDK is already using internally.
+    ///
+    /// Capped at `maxServerBackupDeleteAttempts` rounds as a sanity backstop against a genuinely
+    /// pathological server response (e.g. something recreating a version between our delete and
+    /// re-check) -- never expected to matter in practice; this account has needed at most a
+    /// handful of deletes even after many earlier broken reset attempts this session.
+    private func deleteAllServerSideBackups() async throws {
+        let maxServerBackupDeleteAttempts = 20
+        let client = try await ensureClient()
+        let accessToken = try client.session().accessToken
+        guard let homeserver = URL(string: client.homeserver()) else {
+            throw MatrixError.invalidHomeserverUrl
+        }
+
+        func authedRequest(_ url: URL, method: String) -> URLRequest {
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            return request
+        }
+
+        let versionUrl = homeserver.appendingPathComponent("_matrix/client/v3/room_keys/version")
+
+        for _ in 0..<maxServerBackupDeleteAttempts {
+            let (data, response) = try await URLSession.shared.data(for: authedRequest(versionUrl, method: "GET"))
+            guard let httpResponse = response as? HTTPURLResponse else { break }
+            if httpResponse.statusCode == 404 {
+                return // Server confirms nothing left -- done.
             }
-            do {
-                try await encryption.disableRecovery()
-            } catch RecoveryError.Client(source: ClientError.Generic(msg: _, details: let details)) where details == "BackupNotEnabled" {
-                // Nothing to disable -- fine, fall through to enabling fresh below.
+            guard httpResponse.statusCode == 200,
+                  let current = try? JSONDecoder().decode(BackupVersionResponse.self, from: data) else {
+                break // Unexpected shape -- don't loop on something we can't interpret.
             }
-            do {
-                return try await encryption.enableRecovery(
-                    waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
-                )
-            } catch RecoveryError.BackupExistsOnServer {
-                lastError = RecoveryError.BackupExistsOnServer
-                continue
+
+            let deleteUrl = homeserver.appendingPathComponent("_matrix/client/v3/room_keys/version/\(current.version)")
+            let (_, deleteResponse) = try await URLSession.shared.data(for: authedRequest(deleteUrl, method: "DELETE"))
+            guard let deleteHttpResponse = deleteResponse as? HTTPURLResponse,
+                  (200..<300).contains(deleteHttpResponse.statusCode) else {
+                break // A delete that didn't actually succeed isn't safe to loop past silently.
             }
         }
-        throw lastError ?? RecoveryError.BackupExistsOnServer
+
+        // Re-check once more: either we exhausted the attempt cap, or a GET/DELETE returned an
+        // unexpected shape above -- both `break` out of the loop rather than returning, so
+        // confirm the end state before deciding whether this is actually a problem.
+        let (data, response) = try await URLSession.shared.data(for: authedRequest(versionUrl, method: "GET"))
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 404 {
+            return
+        }
+        let lastVersion = (try? JSONDecoder().decode(BackupVersionResponse.self, from: data))?.version ?? "?"
+        throw MatrixError.tooManyServerSideBackups(lastVersion: lastVersion)
     }
 
     /// `Encryption.recoveryState()` starts at `.unknown` right after login until the SDK's
