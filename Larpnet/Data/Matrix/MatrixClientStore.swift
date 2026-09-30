@@ -288,32 +288,47 @@ final class MatrixClientStore {
     /// `CLAUDE.md`): this is "let me set a new key", not a guarantee that a device which
     /// already has the old keys locally loses access to old history.
     ///
-    /// **Does not use `Encryption.disableRecovery()` at all** -- two earlier versions of this
-    /// function did (gated on `waitForRecoveryState()`, then retried a few times), and both
-    /// were confirmed live to fail unreliably in different ways on the same account
-    /// (`BackupNotEnabled` and `BackupExistsOnServer`, on different attempts). Root cause, read
-    /// straight from the Rust source: `Backups::disable()` only deletes the *one* backup
-    /// version this device's **local crypto store** currently happens to know about
-    /// (`olm_machine.backup_machine().get_backup_keys()`); it never asks the server what
-    /// actually exists. If local knowledge is stale relative to the server -- plausible on any
-    /// account that's been through several earlier reset attempts, as this one was while this
-    /// bug was being tracked down -- disabling "succeeds" while an orphaned version remains on
-    /// the server, and the next `enableRecovery()` correctly refuses to overwrite it. Retrying
-    /// the same disable-then-enable pass doesn't fix a stale local cache; it just changes which
-    /// failure shows up.
+    /// Two earlier versions of this function tried a plain `disableRecovery()`-then-`enable`
+    /// pass (gated on `waitForRecoveryState()`, then retried a few times) and both were
+    /// confirmed live to fail unreliably in different ways on the same account
+    /// (`BackupNotEnabled` and `BackupExistsOnServer`, on different attempts). Two distinct
+    /// problems had to be fixed, both confirmed by reading the actual Rust source
+    /// (`Backups`/`Recovery` in `matrix-sdk`), not guessed:
     ///
-    /// Fixed by copying the strategy **web's `matrix-js-sdk` already uses and never has this
-    /// problem with** (confirmed by reading its source, `rust-crypto/backup.js`'s
-    /// `deleteAllKeyBackupVersions()`): ask the *server* directly, in a loop -- "what's the
-    /// current backup version? delete it. ask again. repeat until there isn't one" -- rather
-    /// than trusting any local cache. The Rust SDK's equivalent (`Backups::disable_and_delete()`)
-    /// exists but was never exposed through this FFI, so `deleteAllServerSideBackups()` below
-    /// replicates it with plain authenticated HTTP calls using the session's own access token.
-    /// Once that loop completes, the server is *guaranteed* to have nothing left, and
-    /// `enableRecovery()` runs exactly the same proven-reliable "fresh account" path
-    /// `setUpRecovery()` already uses -- called once, no retry wrapper needed.
+    /// 1. **Server-side backup deletion must not trust the local crypto store.**
+    ///    `Backups::disable()` only deletes the *one* backup version this device's local crypto
+    ///    store currently happens to know about (`olm_machine.backup_machine().get_backup_keys()`);
+    ///    it never asks the server what actually exists. If local knowledge is stale relative to
+    ///    the server -- plausible on any account that's been through several earlier reset
+    ///    attempts -- disabling "succeeds" while an orphaned version remains on the server, and
+    ///    the next `enableRecovery()` correctly refuses to overwrite it (`BackupExistsOnServer`).
+    ///    Fixed by copying the strategy **web's `matrix-js-sdk` already uses and never has this
+    ///    problem with** (confirmed by reading its source, `rust-crypto/backup.js`'s
+    ///    `deleteAllKeyBackupVersions()`): ask the *server* directly, in a loop -- "what's the
+    ///    current backup version? delete it. ask again. repeat until there isn't one." The Rust
+    ///    SDK's own equivalent (`Backups::disable_and_delete()`) exists but was never exposed
+    ///    through this FFI, so `deleteAllServerSideBackups()` below replicates it with plain
+    ///    authenticated HTTP calls using the session's own access token.
+    ///
+    /// 2. **`enableRecovery()` must be told the old backup is gone, not just have it deleted out
+    ///    from under it.** Confirmed from the Rust source: `Enable`'s future only touches the
+    ///    backup at all when the *local* `backups().are_enabled()` flag is false -- if a previous
+    ///    session already activated a backup, that flag stays true regardless of what
+    ///    `deleteAllServerSideBackups()` just did to the server, and `enableRecovery()` silently
+    ///    skips recreating a backup entirely, rotating only the secret-storage key. Confirmed
+    ///    live (on the Android port of this same fix): two resets in a row each returned a
+    ///    distinct-looking "new" recovery key while zero requests touched `room_keys/version` and
+    ///    the account was left with no working backup at all -- worse than the original bug,
+    ///    since it also discards whatever backup existed. Fixed by calling `disableRecovery()`
+    ///    first purely to flip that local flag to false; its own server-side deletion is the same
+    ///    unreliable one-version attempt as above, which is why `deleteAllServerSideBackups()`
+    ///    still runs unconditionally afterward. `disableRecovery()` is expected to throw here
+    ///    (e.g. when local state was already stale, exactly the account shape problem 1 fixes) --
+    ///    read from source that the local flag flips to `.unknown` before that error ever
+    ///    propagates, so the throw is safe to ignore.
     func resetRecovery(passphrase: String?) async throws -> String {
         let client = try await ensureClient()
+        try? await client.encryption().disableRecovery()
         try await deleteAllServerSideBackups()
         return try await client.encryption().enableRecovery(
             waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
