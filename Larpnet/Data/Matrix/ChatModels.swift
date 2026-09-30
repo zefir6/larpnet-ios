@@ -42,6 +42,7 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
 struct ChatRoomMember: Identifiable, Sendable, Hashable {
     let userId: String
     let displayName: String
+    let avatarUrl: String?
     var id: String { userId }
 }
 

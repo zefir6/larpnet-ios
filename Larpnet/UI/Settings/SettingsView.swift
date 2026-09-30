@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showResetRecoveryConfirm = false
     @State private var showResetRecoverySheet = false
     @State private var showRestoreRecoverySheet = false
+    @AppStorage("show_chat_timestamps") private var showChatTimestamps = true
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
 
@@ -120,6 +121,7 @@ struct SettingsView: View {
             // never even gets the historical events without the key). This entry point re-opens
             // the same flow on demand; safe to run even when already unlocked.
             Section("Chat") {
+                Toggle("Show timestamps in chat list", isOn: $showChatTimestamps)
                 Button("Unlock chat history") {
                     showRestoreRecoverySheet = true
                 }

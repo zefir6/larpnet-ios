@@ -4,6 +4,7 @@ struct ChatRoomInfoView: View {
     @State private var viewModel: ChatRoomInfoViewModel
     let onAddMember: () -> Void
     let onLeft: () -> Void
+    private let appContainer: AppContainer
 
     init(
         roomId: String, appContainer: AppContainer,
@@ -12,6 +13,7 @@ struct ChatRoomInfoView: View {
         _viewModel = State(initialValue: ChatRoomInfoViewModel(roomId: roomId, appContainer: appContainer))
         self.onAddMember = onAddMember
         self.onLeft = onLeft
+        self.appContainer = appContainer
     }
 
     var body: some View {
@@ -29,7 +31,8 @@ struct ChatRoomInfoView: View {
             }
             Section("Participants") {
                 ForEach(viewModel.members) { member in
-                    HStack {
+                    HStack(spacing: 10) {
+                        MatrixAvatarView(avatarUrl: member.avatarUrl, name: member.displayName, size: 36, appContainer: appContainer)
                         Text(member.displayName)
                         Spacer()
                         Button("Remove", role: .destructive) {

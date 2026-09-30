@@ -315,7 +315,10 @@ final class MatrixClientStore {
         }
         let others = all.filter { ($0.membership == .join || $0.membership == .invite) && $0.userId != selfId }
         let members = others.map {
-            ChatRoomMember(userId: $0.userId, displayName: resolvedName(userId: $0.userId, fallbackDisplayName: $0.displayName))
+            ChatRoomMember(
+                userId: $0.userId, displayName: resolvedName(userId: $0.userId, fallbackDisplayName: $0.displayName),
+                avatarUrl: $0.avatarUrl
+            )
         }
         return ChatRoomInfo(roomId: roomId, rawName: room.rawName() ?? "", isGroup: members.count != 1, members: members)
     }

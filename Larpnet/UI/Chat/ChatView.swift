@@ -97,6 +97,7 @@ struct ChatView: View {
 private struct ChatRoomRow: View {
     let room: ChatRoom
     let appContainer: AppContainer
+    @AppStorage("show_chat_timestamps") private var showTimestamps = true
 
     private var hasUnread: Bool { room.unreadCount > 0 }
 
@@ -111,7 +112,7 @@ private struct ChatRoomRow: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 4) {
-                if let timestamp = room.timestamp {
+                if showTimestamps, let timestamp = room.timestamp {
                     Text(RelativeTime.short(from: timestamp))
                         .font(.caption)
                         .foregroundStyle(hasUnread ? LarpnetTheme.accent : .secondary)
