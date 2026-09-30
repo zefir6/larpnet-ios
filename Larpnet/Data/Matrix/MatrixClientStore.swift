@@ -144,6 +144,11 @@ final class MatrixClientStore {
     /// same division of responsibility as `larpnet_matrix_dm_localpart()`'s doc comment
     /// describes for the web client.
     func openOrCreateDirectRoom(nickname: String) async throws -> String {
+        // `serverName` is only populated by `ensureClient()`'s login flow -- reading it before
+        // calling that (confirmed live: hitting this as the very first Matrix operation of the
+        // app session, e.g. starting a chat without ever having opened the Chat tab first) threw
+        // `malformedIdentity` unconditionally, regardless of whether `nickname` was ever valid.
+        _ = try await ensureClient()
         guard let serverName else { throw MatrixError.malformedIdentity }
         return try await openOrCreateDirectRoom(targetMxid: "@\(nickname.lowercased()):\(serverName)")
     }
@@ -283,29 +288,63 @@ final class MatrixClientStore {
     /// state (a fresh secret-storage key/backup version) via the same path `setUpRecovery()`
     /// already uses.
     ///
-    /// Skips `disableRecovery()` only when recovery is `.disabled` (never set up at all) --
-    /// confirmed live that calling it on an account in that state throws
-    /// `ClientError.Generic(msg: "backups are not enabled", details: "BackupNotEnabled")`
-    /// (`Recovery.disable()`'s first step is `backups().disable()`, which requires a backup to
-    /// already exist). The Settings screen offers this button unconditionally, so this has to
-    /// tolerate "there's nothing to disable yet" and just enable fresh recovery in that case --
-    /// functionally the same outcome `setUpRecovery()` would give.
+    /// Always calls `disableRecovery()` first, unconditionally -- **not** gated on
+    /// `waitForRecoveryState()` (an earlier version tried that; see git history). That state is
+    /// reported by the SDK's own local cache, and confirmed live twice over, in both
+    /// directions, that it doesn't reliably match whether a server-side backup actually exists
+    /// at the moment this runs: trusting `.enabled`/`.incomplete` vs `.disabled` to decide
+    /// whether to disable first produced *both* `BackupNotEnabled` (disabled when nothing
+    /// existed) *and* `BackupExistsOnServer` (skipped disabling when something did) on
+    /// different attempts against the same account. Asking the SDK "does a backup exist" by
+    /// just trying to remove one, and only reacting to whether that specific call succeeds, is
+    /// the one source of truth that can't be stale.
     ///
-    /// `.incomplete` (recovery/backup exists server-side, e.g. set up on another device, but
-    /// this device hasn't unlocked it) still needs the `disableRecovery()` call -- a backup
-    /// *does* already exist there too, just not one this device has restored. Confirmed live:
-    /// treating `.incomplete` the same as `.disabled` (skipping disable) instead throws
-    /// `ClientError.Generic(details: "BackupExistsOnServer")` from `enableRecovery()`, since it
-    /// refuses to create a new backup version over an existing, un-superseded one.
+    /// So: always attempt `disableRecovery()`, and swallow exactly one specific failure --
+    /// `RecoveryError.Client(source: .Generic(details: "BackupNotEnabled"))`, meaning there was
+    /// truly nothing to disable (never set up at all) -- proceeding straight to
+    /// `enableRecovery()` in that case, same outcome `setUpRecovery()` would give. Any other
+    /// error (including a hypothetical `.BackupExistsOnServer` from this call, or a genuine
+    /// network failure) propagates normally; the Settings screen offers this button
+    /// unconditionally, so "nothing to disable yet" is the only case that's actually expected
+    /// rather than a real failure.
+    ///
+    /// Even so, confirmed live that a single disable-then-enable pass can still hit
+    /// `RecoveryError.BackupExistsOnServer` from `enableRecovery()` *right after* `disableRecovery()`
+    /// reported success. Read the Rust source (`Backups::disable()`) to understand why: it
+    /// deletes only the backup version *this device's local crypto store* currently knows
+    /// about (`olm_machine.backup_machine().get_backup_keys()`), while `enableRecovery()`'s
+    /// `BackupExistsOnServer` check asks the *server* fresh (`backups().fetch_exists_on_server()`).
+    /// Those two can disagree if this device's local record of the backup version is stale
+    /// relative to the server (plausible on this account specifically, after many manual reset
+    /// attempts earlier while this exact bug was being tracked down). The SDK's FFI surface
+    /// doesn't expose `Backups::disable_and_delete()` (the version that loops against the
+    /// server's *actual* current version instead of the local cache), so the best available
+    /// mitigation from here is retrying the full disable-then-enable pass a few times -- each
+    /// attempt re-reads local backup-key state fresh, which has a real chance of catching up
+    /// once whatever produced the mismatch (e.g. a background sync task) settles.
     func resetRecovery(passphrase: String?) async throws -> String {
         let client = try await ensureClient()
         let encryption = client.encryption()
-        if try await waitForRecoveryState() != .disabled {
-            try await encryption.disableRecovery()
+        var lastError: Error?
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            do {
+                try await encryption.disableRecovery()
+            } catch RecoveryError.Client(source: ClientError.Generic(msg: _, details: let details)) where details == "BackupNotEnabled" {
+                // Nothing to disable -- fine, fall through to enabling fresh below.
+            }
+            do {
+                return try await encryption.enableRecovery(
+                    waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
+                )
+            } catch RecoveryError.BackupExistsOnServer {
+                lastError = RecoveryError.BackupExistsOnServer
+                continue
+            }
         }
-        return try await encryption.enableRecovery(
-            waitForBackupsToUpload: true, passphrase: passphrase, progressListener: RecoveryProgressBridge { _ in }
-        )
+        throw lastError ?? RecoveryError.BackupExistsOnServer
     }
 
     /// `Encryption.recoveryState()` starts at `.unknown` right after login until the SDK's

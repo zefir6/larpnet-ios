@@ -61,20 +61,40 @@ struct ChatThreadView: View {
                     scrollProxy.scrollTo(Self.bottomAnchorId, anchor: .bottom)
                 }
             }
-            if let errorMessage = viewModel.errorMessage {
+            if let errorMessage = viewModel.errorMessage, !viewModel.failedToLoad {
                 Text(errorMessage).font(.caption).foregroundStyle(.red).padding(.horizontal)
             }
-            HStack {
-                TextField("Message", text: $viewModel.draft)
-                    .textFieldStyle(.roundedBorder)
-                Button("Send") { Task { await viewModel.send() } }
-                    .disabled(viewModel.isSending || viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            // Hidden rather than just disabled when there's no room to send into at all --
+            // a visible-but-grayed composer still reads as "this will work once you type
+            // something", which isn't true here.
+            if !viewModel.failedToLoad {
+                HStack {
+                    TextField("Message", text: $viewModel.draft)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Send") { Task { await viewModel.send() } }
+                        .disabled(viewModel.isSending || viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding()
             }
-            .padding()
         }
         .overlay {
             if viewModel.isLoading, viewModel.messages.isEmpty {
                 ProgressView()
+            } else if viewModel.failedToLoad {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.bubble")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Couldn't start this conversation")
+                        .font(.headline)
+                    if let errorMessage = viewModel.errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                }
             } else if !viewModel.isLoading, viewModel.messages.isEmpty {
                 Text("No messages yet -- say hello").foregroundStyle(.secondary)
             }
