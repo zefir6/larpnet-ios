@@ -32,6 +32,12 @@ final class ChatThreadViewModel {
     var draft: String = ""
     var errorMessage: String?
 
+    /// No room to send into at all (as opposed to a room that loaded fine but a later `send()`
+    /// failed) -- `ChatThreadView` uses this to show a clear failure state and hide the
+    /// composer, rather than the misleading "empty, ready to type" look a bare `errorMessage`
+    /// next to a still-active composer gives.
+    var failedToLoad: Bool { !isLoading && roomId == nil && errorMessage != nil }
+
     private let target: ChatThreadTarget
     private let appContainer: AppContainer
     private var handle: ChatTimelineHandle?
