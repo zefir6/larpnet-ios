@@ -113,8 +113,35 @@ final class MatrixClientStore {
         return newClient
     }
 
+    /// Room ids currently being joined by `acceptLocalInvites` -- `rooms()` runs on every sync
+    /// update, so the same invite would otherwise be joined several times concurrently.
+    private var joiningInvites: Set<String> = []
+
+    /// Auto-accepts invites from other users on this homeserver -- the actual reason "messages
+    /// never arrive": starting a chat creates an encrypted room and only *invites* the other
+    /// person, and no client of ours ever joined an invited room (this one didn't even list
+    /// them, see `rooms()`). An invited user sees none of a room's timeline, so the recipient's
+    /// side stayed empty forever. Invites from other servers are left alone (prod federates;
+    /// auto-joining arbitrary remote invites would be a spam vector). `Room.join()` marks the
+    /// room as a DM in our own `m.direct` itself when the invite had `is_direct`, so
+    /// `openOrCreateDirectRoom()` then resolves to the same room. Same policy as the web
+    /// client's `autoJoinLocalInvites()` and larpnet-android's `acceptLocalInvites()`.
+    private func acceptLocalInvites(_ client: Client) async {
+        guard let ownServer = serverName else { return }
+        for room in client.rooms() where room.membership() == .invited {
+            let roomId = room.id()
+            guard !joiningInvites.contains(roomId) else { continue }
+            guard let inviter = try? await room.inviter()?.userId,
+                  Self.serverName(fromMxid: inviter) == ownServer else { continue }
+            joiningInvites.insert(roomId)
+            defer { joiningInvites.remove(roomId) }
+            try? await room.join()
+        }
+    }
+
     func rooms() async throws -> [ChatRoom] {
         let client = try await ensureClient()
+        await acceptLocalInvites(client)
         var result: [ChatRoom] = []
         for room in client.rooms() where room.membership() == .joined {
             let name = await displayName(for: room)
