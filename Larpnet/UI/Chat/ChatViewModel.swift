@@ -11,7 +11,7 @@ final class ChatViewModel {
     private(set) var rooms: [ChatRoom] = []
     private(set) var isLoading = false
     var errorMessage: String?
-    /// nil once resolved (nothing to show) -- see `MatrixClientStore.recoveryPromptKind()`.
+    /// nil once resolved (nothing to show) -- see `MatrixClientStore.ensureEncryption()`.
     private(set) var recoveryPrompt: MatrixClientStore.RecoveryPromptKind?
 
     private let appContainer: AppContainer
@@ -28,7 +28,9 @@ final class ChatViewModel {
         await appContainer.matrixClientStore.consolidateDuplicateDirectRooms()
         await refresh()
         subscribeToUpdates()
-        recoveryPrompt = try? await appContainer.matrixClientStore.recoveryPromptKind()
+        // Standard encryption mode unlocks silently with the server-held passphrase; only
+        // private mode (or a legacy key on a locked device) yields a prompt here.
+        recoveryPrompt = try? await appContainer.matrixClientStore.ensureEncryption()
     }
 
     func dismissRecoveryPrompt() {

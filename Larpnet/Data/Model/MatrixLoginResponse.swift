@@ -18,6 +18,9 @@ struct MatrixLoginResponse: Decodable, Sendable {
     /// registration entirely. Never a standalone secret: this app must never be handed
     /// `LARPNET_MATRIX_PUSH_SECRET` on its own, only this pre-built URL.
     let pushGatewayUrl: String?
+    /// Chat encryption mode + (in standard mode) the server-held recovery passphrase -- see
+    /// `MatrixEncryptionInfo`. Nil from servers that predate encryption modes.
+    let encryption: MatrixEncryptionInfo?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -27,6 +30,7 @@ struct MatrixLoginResponse: Decodable, Sendable {
         case token
         case contacts
         case pushGatewayUrl = "push_gateway_url"
+        case encryption
     }
 
     init(from decoder: Decoder) throws {
@@ -39,10 +43,27 @@ struct MatrixLoginResponse: Decodable, Sendable {
         // Tolerant: older server builds (before the contacts field shipped) omit this key.
         contacts = container.decode(.contacts, default: [])
         pushGatewayUrl = try container.decodeIfPresent(String.self, forKey: .pushGatewayUrl)
+        encryption = try? container.decodeIfPresent(MatrixEncryptionInfo.self, forKey: .encryption)
     }
 }
 
 struct MatrixContact: Decodable, Sendable {
     let nickname: String
     let name: String
+}
+
+/// `larpnet_matrix_escrow_get()`'s shape, from `POST /larpnet_matrix` and
+/// `POST /larpnet_matrix/encryption`. See friendica-larpnet's `addon/larpnet_matrix/CLAUDE.md`
+/// "Encryption modes": in standard mode the server holds `passphrase` and this app unlocks chat
+/// history with it silently; in private mode (or with a nil `passphrase`) the user holds their
+/// own key and the manual prompts apply. `state` is "pending" until some client confirms it
+/// applied `passphrase` to the Matrix account.
+struct MatrixEncryptionInfo: Decodable, Sendable, Equatable {
+    let mode: String
+    let state: String
+    let passphrase: String?
+
+    var isStandard: Bool { mode == "standard" && !(passphrase ?? "").isEmpty }
+    var isPrivate: Bool { mode == "private" }
+    var isPending: Bool { state == "pending" }
 }

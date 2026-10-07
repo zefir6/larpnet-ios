@@ -74,7 +74,8 @@ struct ChatView: View {
                     mode: kind == .needsSetup ? .setup : .restore,
                     appContainer: appContainer,
                     onDone: { viewModel.dismissRecoveryPrompt() },
-                    onSkip: kind == .needsRestore ? { viewModel.dismissRecoveryPrompt() } : nil
+                    onSkip: kind != .needsSetup ? { viewModel.dismissRecoveryPrompt() } : nil,
+                    legacy: kind == .needsRestoreLegacy
                 )
             }
         }

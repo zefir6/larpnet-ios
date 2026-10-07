@@ -3,7 +3,8 @@ import SwiftUI
 /// Presented as a `.sheet` -- setup/restore from `ChatView` right after login (see
 /// `MatrixClientStore.recoveryPromptKind()`), reset from `SettingsView`. Non-dismissable for
 /// `.setup`/`.reset` until a key is chosen and confirmed (there's nothing sensible to skip to);
-/// `.restore` allows "Later" since new messages still work without it.
+/// `.restore` allows "Later" since new messages still work without it, and `.makePrivate` can
+/// be cancelled until a key is chosen.
 struct RecoveryKeyView: View {
     @State private var viewModel: RecoveryKeyViewModel
     @Environment(\.dismiss) private var dismiss
@@ -12,9 +13,9 @@ struct RecoveryKeyView: View {
 
     init(
         mode: RecoveryKeyViewModel.Mode, appContainer: AppContainer,
-        onDone: @escaping () -> Void, onSkip: (() -> Void)? = nil
+        onDone: @escaping () -> Void, onSkip: (() -> Void)? = nil, legacy: Bool = false
     ) {
-        _viewModel = State(initialValue: RecoveryKeyViewModel(mode: mode, appContainer: appContainer))
+        _viewModel = State(initialValue: RecoveryKeyViewModel(mode: mode, appContainer: appContainer, legacy: legacy))
         self.onDone = onDone
         self.onSkip = onSkip
     }
@@ -33,7 +34,15 @@ struct RecoveryKeyView: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
         }
-        .interactiveDismissDisabled(viewModel.mode != .restore || viewModel.restoreSucceeded)
+        .interactiveDismissDisabled(!isDismissable)
+    }
+
+    private var isDismissable: Bool {
+        switch viewModel.mode {
+        case .restore: return !viewModel.restoreSucceeded
+        case .makePrivate: return viewModel.recoveryKey == nil && !viewModel.isBusy
+        case .setup, .reset: return false
+        }
     }
 
     private var title: String {
@@ -41,6 +50,7 @@ struct RecoveryKeyView: View {
         case .setup: return "Set up recovery key"
         case .reset: return "Reset recovery key"
         case .restore: return "Unlock chat history"
+        case .makePrivate: return "Turn on private mode"
         }
     }
 
@@ -48,11 +58,7 @@ struct RecoveryKeyView: View {
     private var chooseBody: some View {
         Form {
             Section {
-                Text(
-                    viewModel.mode == .reset
-                        ? "Your old key will stop working. Choose a new one -- random or your own phrase."
-                        : "This key lets you read chat history on a new device. You can generate a random key or set your own, memorable phrase."
-                )
+                Text(chooseExplanation)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             }
@@ -76,6 +82,25 @@ struct RecoveryKeyView: View {
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
             }
+            if viewModel.mode == .makePrivate, let onSkip {
+                Section {
+                    Button("Cancel", action: onSkip).disabled(viewModel.isBusy)
+                }
+            }
+        }
+    }
+
+    private var chooseExplanation: String {
+        switch viewModel.mode {
+        case .reset:
+            return "Your old key will stop working. Choose a new one -- random or your own phrase."
+        case .makePrivate:
+            return "Larpnet will stop keeping your chat history key -- administrators won't be " +
+                "able to access your new messages. You'll need to enter the key or phrase you " +
+                "choose now on every new device, and losing it means losing your history. " +
+                "Choose a random key or your own phrase."
+        case .setup, .restore:
+            return "This key lets you read chat history on a new device. You can generate a random key or set your own, memorable phrase."
         }
     }
 
@@ -105,9 +130,14 @@ struct RecoveryKeyView: View {
         Form {
             Section {
                 Text(
-                    "This is a new device -- enter your recovery key (or phrase, if you set one) " +
-                    "to read earlier messages. You can do this later -- new messages will work " +
-                    "already."
+                    viewModel.legacy
+                        ? "Larpnet now remembers your chat history key for you, so you won't need " +
+                          "to enter it again. To carry over your existing history, enter your old " +
+                          "recovery key (or phrase) one last time. You can also do this later, or " +
+                          "on another device where chat is already unlocked."
+                        : "This is a new device -- enter your recovery key (or phrase, if you set one) " +
+                          "to read earlier messages. You can do this later -- new messages will work " +
+                          "already."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
