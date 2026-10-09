@@ -458,6 +458,12 @@ final class FriendicaAPIClient: Sendable {
         try await send(path: "larpnet_matrix", method: "POST")
     }
 
+    /// `POST /larpnet_matrix/encryption` (`larpnet_matrix_encryption_endpoint()`) -- `action`
+    /// is `get`, `confirm`, `set_private` or `prepare_standard`. See `MatrixEncryptionInfo`.
+    func matrixEncryption(action: String) async throws -> MatrixEncryptionInfo {
+        try await send(path: "larpnet_matrix/encryption", method: "POST", query: [URLQueryItem(name: "action", value: action)])
+    }
+
     // MARK: - Classic notification push (APNs)
 
     /// `POST /larpnet_apns` -- the `larpnet_apns` addon's device-token registration endpoint,

@@ -6,6 +6,10 @@ import Foundation
 /// - `.restore`: this device doesn't have local access to already-existing recovery yet --
 ///   enter the saved key *or* the phrase it was set up with (see
 ///   `MatrixClientStore.restoreRecovery()`'s doc comment for why the same field accepts both).
+///   `legacy`: the account is being moved to standard encryption mode but still has the user's
+///   own old key -- after it unlocks this device, `ensureEncryption()` migrates.
+/// - `.makePrivate`: same choose-then-show flow as `.reset`, for switching from standard to
+///   private encryption mode (`MatrixClientStore.switchToPrivate`).
 @MainActor
 @Observable
 final class RecoveryKeyViewModel {
@@ -13,6 +17,7 @@ final class RecoveryKeyViewModel {
         case setup
         case reset
         case restore
+        case makePrivate
     }
 
     let mode: Mode
@@ -23,11 +28,13 @@ final class RecoveryKeyViewModel {
     var restoreInput = ""
     var errorMessage: String?
 
+    let legacy: Bool
     private let appContainer: AppContainer
 
-    init(mode: Mode, appContainer: AppContainer) {
+    init(mode: Mode, appContainer: AppContainer, legacy: Bool = false) {
         self.mode = mode
         self.appContainer = appContainer
+        self.legacy = legacy
     }
 
     func chooseRandom() async {
@@ -47,6 +54,11 @@ final class RecoveryKeyViewModel {
         defer { isBusy = false }
         do {
             try await appContainer.matrixClientStore.restoreRecovery(input: trimmed)
+            if legacy {
+                // Now unlocked with the old key -- migrate to the server passphrase. A failure
+                // here just means the next session retries; history is already readable.
+                _ = try? await appContainer.matrixClientStore.ensureEncryption()
+            }
             errorMessage = nil
             restoreSucceeded = true
         } catch {
@@ -63,10 +75,14 @@ final class RecoveryKeyViewModel {
                 recoveryKey = try await appContainer.matrixClientStore.setUpRecovery(passphrase: passphrase)
             case .reset:
                 recoveryKey = try await appContainer.matrixClientStore.resetRecovery(passphrase: passphrase)
+            case .makePrivate:
+                recoveryKey = try await appContainer.matrixClientStore.switchToPrivate(passphrase: passphrase)
             case .restore:
                 break
             }
             errorMessage = nil
+        } catch let error as MatrixClientStore.DeviceLockedError {
+            errorMessage = error.localizedDescription
         } catch {
             errorMessage = String(describing: error)
         }

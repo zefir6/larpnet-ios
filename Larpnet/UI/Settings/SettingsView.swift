@@ -7,9 +7,6 @@ import SwiftUI
 /// logout.
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
-    @State private var showResetRecoveryConfirm = false
-    @State private var showResetRecoverySheet = false
-    @State private var showRestoreRecoverySheet = false
     @AppStorage("show_chat_timestamps") private var showChatTimestamps = true
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
@@ -113,39 +110,9 @@ struct SettingsView: View {
                 }
             }
 
-            // "Unlock chat history" is also auto-prompted right after login when needed (see
-            // `ChatView`'s `.sheet` on `recoveryPromptKind()`), but that check only runs once
-            // per app launch -- tapping "Later" there left no way back in for the rest of the
-            // session (confirmed live: a device stuck in this state shows every conversation as
-            // empty, "No messages yet", not just undecryptable placeholders, since the timeline
-            // never even gets the historical events without the key). This entry point re-opens
-            // the same flow on demand; safe to run even when already unlocked.
             Section("Chat") {
                 Toggle("Show timestamps in chat list", isOn: $showChatTimestamps)
-                Button("Unlock chat history") {
-                    showRestoreRecoverySheet = true
-                }
-                Button("Reset recovery key", role: .destructive) {
-                    showResetRecoveryConfirm = true
-                }
-            }
-            .confirmationDialog(
-                "This will remove access to chat history using the old key on new devices. This action cannot be undone.",
-                isPresented: $showResetRecoveryConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Reset", role: .destructive) { showResetRecoverySheet = true }
-                Button("Cancel", role: .cancel) {}
-            }
-            .sheet(isPresented: $showResetRecoverySheet) {
-                RecoveryKeyView(mode: .reset, appContainer: appContainer, onDone: { showResetRecoverySheet = false })
-            }
-            .sheet(isPresented: $showRestoreRecoverySheet) {
-                RecoveryKeyView(
-                    mode: .restore, appContainer: appContainer,
-                    onDone: { showRestoreRecoverySheet = false },
-                    onSkip: { showRestoreRecoverySheet = false }
-                )
+                ChatEncryptionRows(appContainer: appContainer)
             }
 
             Section("Following") {
@@ -238,5 +205,146 @@ struct SettingsView: View {
                     }
                 }
             }
+    }
+}
+
+/// Chat encryption rows -- see friendica-larpnet's `addon/larpnet_matrix/CLAUDE.md` "Encryption
+/// modes". Standard mode (server holds the recovery passphrase, history unlocks itself): "show
+/// my phrase" + switch to private. Private mode (or a server without escrow): the old manual
+/// "Unlock chat history"/"Reset recovery key" entries, plus switch back to standard.
+///
+/// "Unlock chat history" exists because the restore flow is auto-prompted only once per launch
+/// (`ChatView`'s `.sheet` on `ensureEncryption()`), and tapping "Later" there used to leave no
+/// way back in -- confirmed live: a device stuck in that state shows every conversation as
+/// empty, not just undecryptable placeholders. Safe to run even when already unlocked.
+private struct ChatEncryptionRows: View {
+    let appContainer: AppContainer
+    @State private var encryption: MatrixEncryptionInfo?
+    @State private var showResetConfirm = false
+    @State private var showResetSheet = false
+    @State private var showRestoreSheet = false
+    @State private var showPrivateSheet = false
+    @State private var showPhraseSheet = false
+    @State private var showStandardConfirm = false
+    @State private var isBusy = false
+    @State private var errorMessage: String?
+
+    private var store: MatrixClientStore { appContainer.matrixClientStore }
+
+    var body: some View {
+        Group {
+            if let encryption, encryption.isStandard || encryption.isPrivate {
+                Text(
+                    encryption.isStandard
+                        ? "Encryption: standard. Larpnet keeps your chat history key, so history works automatically on every device. Server administrators can technically access it."
+                        : "Encryption: private. Only you know your chat history key -- administrators can't access it. You need to enter it on new devices."
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+            if encryption?.isStandard == true {
+                Button("Show recovery phrase") { showPhraseSheet = true }
+                Button("Turn on private mode") { showPrivateSheet = true }
+            } else {
+                Button("Unlock chat history") { showRestoreSheet = true }
+                if encryption?.isPrivate == true {
+                    Button {
+                        showStandardConfirm = true
+                    } label: {
+                        if isBusy { ProgressView() } else { Text("Switch back to standard mode") }
+                    }
+                    .disabled(isBusy)
+                }
+                Button("Reset recovery key", role: .destructive) { showResetConfirm = true }
+            }
+            if let errorMessage {
+                Text(errorMessage).font(.footnote).foregroundStyle(.red)
+            }
+        }
+        .task {
+            encryption = store.encryptionInfo
+            if let fresh = await store.fetchEncryptionInfo() { encryption = fresh }
+        }
+        .confirmationDialog(
+            "This will remove access to chat history using the old key on new devices. This action cannot be undone.",
+            isPresented: $showResetConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Reset", role: .destructive) { showResetSheet = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Larpnet will keep your chat history key again, so you won't need to enter it on new devices. Server administrators will technically be able to access your messages.",
+            isPresented: $showStandardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Yes, switch") { Task { await switchToStandard() } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showResetSheet) {
+            RecoveryKeyView(mode: .reset, appContainer: appContainer, onDone: { showResetSheet = false })
+        }
+        .sheet(isPresented: $showRestoreSheet) {
+            RecoveryKeyView(
+                mode: .restore, appContainer: appContainer,
+                onDone: { showRestoreSheet = false },
+                onSkip: { showRestoreSheet = false }
+            )
+        }
+        .sheet(isPresented: $showPrivateSheet, onDismiss: { encryption = store.encryptionInfo }) {
+            RecoveryKeyView(
+                mode: .makePrivate, appContainer: appContainer,
+                onDone: { showPrivateSheet = false },
+                onSkip: { showPrivateSheet = false }
+            )
+        }
+        .sheet(isPresented: $showPhraseSheet) {
+            RecoveryPhraseView(phrase: encryption?.passphrase ?? "", onDone: { showPhraseSheet = false })
+        }
+    }
+
+    private func switchToStandard() async {
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await store.switchToStandard()
+        } catch let error as MatrixClientStore.DeviceLockedError {
+            errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = "Couldn't change the encryption mode. Please try again."
+        }
+        encryption = store.encryptionInfo
+    }
+}
+
+/// Standard mode's "show my recovery phrase" -- the server-held passphrase, for use in another
+/// Matrix client (e.g. Element's "Security Phrase").
+private struct RecoveryPhraseView: View {
+    let phrase: String
+    let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(
+                        "Larpnet uses it automatically on all your devices -- you never need to " +
+                        "type it. It's only useful if you want to use another Matrix app (e.g. " +
+                        "Element, as a \"Security Phrase\"). Don't share it with anyone."
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+                Section {
+                    Text(phrase).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                }
+                Section {
+                    Button("Close", action: onDone)
+                }
+            }
+            .navigationTitle("Recovery phrase")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }

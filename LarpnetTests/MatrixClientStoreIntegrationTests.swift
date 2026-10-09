@@ -22,9 +22,9 @@ import MatrixRustSDK
 /// sees as *joined* members at send time. Device B must log in AND join the room *before*
 /// device A sends -- otherwise the message is permanently undecryptable by device B, the same
 /// "sent by a device that didn't know about me yet" class of problem as the web client's
-/// recovery-key work (`addon/larpnet_matrix/CLAUDE.md`), just via a different mechanism (no
-/// cross-signing/key-backup exists on native at all -- see `MatrixClientStore`'s own doc
-/// comment on that policy). Each side's client also needs an explicit `syncOnceV2()` call
+/// recovery-key work (`addon/larpnet_matrix/CLAUDE.md`), just via a different mechanism (key
+/// backup only helps *after* the fact, via `MatrixClientStore.ensureEncryption()`'s recovery
+/// unlock -- this test deliberately exercises live key sharing without it). Each side's client also needs an explicit `syncOnceV2()` call
 /// (captured from `ensureClient()`'s return value) at the right moments rather than relying on
 /// the background sync loop's own timing, so this test isn't flaky against real network
 /// latency.

@@ -55,6 +55,10 @@ final class MatrixClientStore {
     /// server hasn't got push configured yet. Set once per `ensureClient()` login, same
     /// lifetime as `serverName`.
     private var pushGatewayUrl: String?
+    /// Last known chat encryption mode -- from the login response, refreshed by
+    /// `fetchEncryptionInfo()` and after every mode change. Nil = server predates encryption
+    /// modes (or the call failed): behave like private mode.
+    private(set) var encryptionInfo: MatrixEncryptionInfo?
 
     init(tokenStore: TokenStore, friendicaAPI: @escaping () throws -> FriendicaAPIClient) {
         self.tokenStore = tokenStore
@@ -86,6 +90,7 @@ final class MatrixClientStore {
         }
         serverName = resolvedServerName
         pushGatewayUrl = identity.pushGatewayUrl
+        encryptionInfo = identity.encryption
 
         let sessionDir = try MatrixSessionPaths.sessionDirectory(for: identity.userId)
         let newClient = try await ClientBuilder()
@@ -108,8 +113,35 @@ final class MatrixClientStore {
         return newClient
     }
 
+    /// Room ids currently being joined by `acceptLocalInvites` -- `rooms()` runs on every sync
+    /// update, so the same invite would otherwise be joined several times concurrently.
+    private var joiningInvites: Set<String> = []
+
+    /// Auto-accepts invites from other users on this homeserver -- the actual reason "messages
+    /// never arrive": starting a chat creates an encrypted room and only *invites* the other
+    /// person, and no client of ours ever joined an invited room (this one didn't even list
+    /// them, see `rooms()`). An invited user sees none of a room's timeline, so the recipient's
+    /// side stayed empty forever. Invites from other servers are left alone (prod federates;
+    /// auto-joining arbitrary remote invites would be a spam vector). `Room.join()` marks the
+    /// room as a DM in our own `m.direct` itself when the invite had `is_direct`, so
+    /// `openOrCreateDirectRoom()` then resolves to the same room. Same policy as the web
+    /// client's `autoJoinLocalInvites()` and larpnet-android's `acceptLocalInvites()`.
+    private func acceptLocalInvites(_ client: Client) async {
+        guard let ownServer = serverName else { return }
+        for room in client.rooms() where room.membership() == .invited {
+            let roomId = room.id()
+            guard !joiningInvites.contains(roomId) else { continue }
+            guard let inviter = try? await room.inviter()?.userId,
+                  Self.serverName(fromMxid: inviter) == ownServer else { continue }
+            joiningInvites.insert(roomId)
+            defer { joiningInvites.remove(roomId) }
+            try? await room.join()
+        }
+    }
+
     func rooms() async throws -> [ChatRoom] {
         let client = try await ensureClient()
+        await acceptLocalInvites(client)
         var result: [ChatRoom] = []
         for room in client.rooms() where room.membership() == .joined {
             let name = await displayName(for: room)
@@ -359,6 +391,105 @@ final class MatrixClientStore {
     enum RecoveryPromptKind {
         case needsSetup
         case needsRestore
+        /// Standard mode, but the account still has the user's own key from before encryption
+        /// modes existed and this device was never unlocked -- see `ensureEncryption()`.
+        case needsRestoreLegacy
+    }
+
+    /// Thrown by `switchToPrivate`/`switchToStandard` when this device isn't unlocked -- both
+    /// rotate secret storage via `resetRecovery`, which is only clean from a device that
+    /// already holds the cross-signing private keys.
+    struct DeviceLockedError: LocalizedError {
+        var errorDescription: String? { "Unlock chat history on this device first." }
+    }
+
+    @discardableResult
+    func fetchEncryptionInfo() async -> MatrixEncryptionInfo? {
+        guard let info = try? await friendicaAPI().matrixEncryption(action: "get") else { return nil }
+        encryptionInfo = info
+        return info
+    }
+
+    /// Runs once per session after login (replaces the old unconditional
+    /// `recoveryPromptKind()` prompt). Same decision tree as the web client's
+    /// `ensureEncryption()` (friendica-larpnet `addon/larpnet_matrix/client/src/encryption.js`)
+    /// and larpnet-android's `MatrixRepository.ensureEncryption()` -- keep the three in step:
+    ///
+    /// - Private mode / no escrow: returns the old manual prompt kind, unchanged.
+    /// - Standard, pending: set up (`.disabled`) or force-reset (`.enabled` -- migrates a legacy
+    ///   user-chosen key, re-uploading this device's own keys) with the server passphrase, then
+    ///   confirm. `.incomplete`: try restoring with it (another device may have applied it
+    ///   already); otherwise `.needsRestoreLegacy` -- never reset from a locked device, it would
+    ///   create secret storage without the cross-signing keys, and these JWT-only accounts can't
+    ///   re-create cross-signing (no UIA flow).
+    /// - Standard, active: restore silently if `.incomplete` -- on failure fall back to the
+    ///   manual prompt, **never** reset, so a transient error can't wipe history.
+    func ensureEncryption() async throws -> RecoveryPromptKind? {
+        try await ensureClient()
+        guard let enc = encryptionInfo, enc.isStandard, let passphrase = enc.passphrase else {
+            return try await recoveryPromptKind()
+        }
+        let status = try await waitForRecoveryState()
+
+        if enc.isPending {
+            switch status {
+            case .disabled:
+                _ = try await setUpRecovery(passphrase: passphrase)
+            case .enabled:
+                _ = try await resetRecovery(passphrase: passphrase)
+            default:
+                do {
+                    try await restoreRecovery(input: passphrase)
+                } catch {
+                    return .needsRestoreLegacy
+                }
+            }
+            encryptionInfo = try await friendicaAPI().matrixEncryption(action: "confirm")
+            return nil
+        }
+
+        switch status {
+        case .incomplete:
+            do {
+                try await restoreRecovery(input: passphrase)
+                return nil
+            } catch {
+                return .needsRestore
+            }
+        case .disabled:
+            // Secret storage vanished server-side; recreate it under the same passphrase.
+            _ = try await setUpRecovery(passphrase: passphrase)
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    /// Standard -> private. Drops the server's copy only AFTER the rotation succeeded (the
+    /// other order could leave the account behind a passphrase nobody has). Returns the key to
+    /// show the user once.
+    func switchToPrivate(passphrase: String?) async throws -> String {
+        try await requireUnlocked()
+        let key = try await resetRecovery(passphrase: passphrase)
+        encryptionInfo = try await friendicaAPI().matrixEncryption(action: "set_private")
+        return key
+    }
+
+    /// Private -> standard, with a brand-new server passphrase. If the reset fails after
+    /// `prepare_standard`, the server stays pending and the next `ensureEncryption()` on any
+    /// unlocked device finishes the switch.
+    func switchToStandard() async throws {
+        try await requireUnlocked()
+        let api = try friendicaAPI()
+        let enc = try await api.matrixEncryption(action: "prepare_standard")
+        guard let passphrase = enc.passphrase else { throw MatrixError.malformedIdentity }
+        _ = try await resetRecovery(passphrase: passphrase)
+        encryptionInfo = try await api.matrixEncryption(action: "confirm")
+    }
+
+    private func requireUnlocked() async throws {
+        try await ensureClient()
+        guard try await waitForRecoveryState() == .enabled else { throw DeviceLockedError() }
     }
 
     func recoveryPromptKind() async throws -> RecoveryPromptKind? {
