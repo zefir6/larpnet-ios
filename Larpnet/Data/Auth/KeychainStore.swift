@@ -151,6 +151,15 @@ final class TokenStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "apns_device_token_hex") }
     }
 
+    /// Last one-time local Matrix session reset this install has done -- see
+    /// `MatrixClientStore.discardLocalSession(_:)`. 0 = never. Not a secret, so `UserDefaults`;
+    /// survives logout on purpose (like `pushEnabled`): a reset already done never needs
+    /// repeating for a later account on the same install.
+    var matrixSessionResetVersion: Int {
+        get { defaults.integer(forKey: "matrix_session_reset_version") }
+        set { defaults.set(newValue, forKey: "matrix_session_reset_version") }
+    }
+
     /// `pushEnabled` is not a secret -- kept in `UserDefaults`, and deliberately *not* cleared
     /// by `clear()`, matching Android's `TokenStore.pushEnabled` (survives logout).
     var pushEnabled: Bool {

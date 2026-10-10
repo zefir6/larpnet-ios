@@ -92,6 +92,11 @@ final class MatrixClientStore {
         pushGatewayUrl = identity.pushGatewayUrl
         encryptionInfo = identity.encryption
 
+        if tokenStore.matrixSessionResetVersion < Self.matrixSessionResetVersion {
+            await discardLocalSession(identity)
+            tokenStore.matrixSessionResetVersion = Self.matrixSessionResetVersion
+        }
+
         let sessionDir = try MatrixSessionPaths.sessionDirectory(for: identity.userId)
         let newClient = try await ClientBuilder()
             .homeserverUrl(url: identity.homeserver)
@@ -662,6 +667,45 @@ final class MatrixClientStore {
     /// this device next doesn't inherit either. Best-effort server-side `logout()` first (so
     /// the device is also cleanly removed from the account), but the local cleanup below runs
     /// regardless of whether that network call succeeds.
+    /// Bump to make every install discard its local Matrix session once more on its next chat
+    /// login -- see `discardLocalSession(_:)`.
+    private static let matrixSessionResetVersion = 1
+
+    /// One-time local reset, run once per `matrixSessionResetVersion` bump on the first chat
+    /// login after an app update. Version 1 = the move to standard chat encryption mode
+    /// (2026-10): every account's old encryption identity was wiped server-side (larpnet-config
+    /// `reset-chat-e2ee.sh`), but this app persists Matrix state locally and never sees deleted
+    /// account data -- a phone that used chat before would keep its stale copy of the old secret
+    /// storage and show the one-time "enter your old key" prompt.
+    ///
+    /// Same end state as logout's `clearSession()`: the old device is logged out server-side (one
+    /// last JWT login to it, then `logout()` -- the only way to delete a device on these JWT-only
+    /// accounts, which have no UIA flow for `DELETE /devices`), then the shared App Group store
+    /// and the Keychain device id are discarded so `ensureClient()` continues as a brand-new
+    /// device. The 60s JWT is reusable within its lifetime, so the fresh login right after still
+    /// works. Best-effort on the server side: if that logout fails, the local reset still happens.
+    /// Same policy as larpnet-android's `MatrixRepository.discardLocalSession()`.
+    private func discardLocalSession(_ identity: MatrixLoginResponse) async {
+        if let oldDeviceId = tokenStore.matrixDeviceId,
+           let dir = try? MatrixSessionPaths.sessionDirectory(for: identity.userId),
+           let old = try? await ClientBuilder()
+               .homeserverUrl(url: identity.homeserver)
+               .sessionPaths(dataPath: dir.path, cachePath: dir.path)
+               .build() {
+            if (try? await old.customLoginWithJwt(
+                jwt: identity.token, initialDeviceName: "larpnet iOS", deviceId: oldDeviceId
+            )) != nil {
+                try? await old.logout()
+            }
+        }
+        if let base = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: MatrixSessionPaths.appGroupIdentifier
+        ) {
+            try? FileManager.default.removeItem(at: base.appendingPathComponent("MatrixSession", isDirectory: true))
+        }
+        tokenStore.clearMatrixDeviceId()
+    }
+
     func clearSession() {
         syncHandle?.cancel()
         syncHandle = nil
