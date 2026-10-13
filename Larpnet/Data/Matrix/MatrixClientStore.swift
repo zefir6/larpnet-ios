@@ -106,6 +106,10 @@ final class MatrixClientStore {
         }
 
         let sessionDir = try MatrixSessionPaths.sessionDirectory(for: identity.userId)
+        if tokenStore.matrixEventCacheResetVersion < Self.matrixEventCacheResetVersion {
+            Self.discardEventCache(in: sessionDir)
+            tokenStore.matrixEventCacheResetVersion = Self.matrixEventCacheResetVersion
+        }
         let newClient = try await ClientBuilder()
             .homeserverUrl(url: identity.homeserver)
             .sessionPaths(dataPath: sessionDir.path, cachePath: sessionDir.path)
@@ -119,11 +123,46 @@ final class MatrixClientStore {
         // against the throwaway `MatrixChatSpikeTests` this store supersedes: without this,
         // a caller that logs in and immediately checks `rooms()` races an empty local store.
         // The continuous background loop below is what keeps that state live afterward.
+        await Self.startEventCache(newClient)
         _ = try await newClient.syncOnceV2(settings: SyncSettingsV2(fullState: true))
+        // Fresh store: there was no room to open a timeline on until now. Nothing was cached
+        // before this either, so nothing is missing -- an empty cache paginates from the end.
+        await Self.startEventCache(newClient)
 
         client = newClient
         startSyncLoop(newClient)
         return newClient
+    }
+
+    /// Makes the SDK's event cache (where every room timeline reads its events from) start
+    /// recording synced events. The SDK only does that once some room's timeline has been
+    /// built, and the plain v2 sync this app uses never builds one -- so everything synced
+    /// before the first chat was opened in a run went unrecorded. A room that already had
+    /// cached events then showed those and nothing newer, for good: back-pagination only fills
+    /// in *before* the oldest cached event (found on larpnet-android, 2026-10-13: a message
+    /// received while the app was closed never appeared, even after reopening the room).
+    ///
+    /// The FFI has no direct call for this, so: build one room's timeline and drop it right
+    /// away -- the subscription it starts lasts as long as the client. No-op with no rooms yet.
+    private static func startEventCache(_ client: Client) async {
+        guard let room = client.rooms().first else { return }
+        _ = try? await room.timeline()
+    }
+
+    /// Bump to make every install drop its local timeline cache once -- see
+    /// `discardEventCache(in:)`. 1 = caches written before `startEventCache(_:)` existed, which
+    /// can be missing messages (2026-10-13).
+    private static let matrixEventCacheResetVersion = 1
+
+    /// One-time removal of the event cache database (only the timeline cache -- not the crypto
+    /// or state stores), for caches written before `startEventCache(_:)` existed. The SDK
+    /// recreates it empty and refills it from the server. Must run before the client is built.
+    private static func discardEventCache(in sessionDir: URL) {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: sessionDir, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("matrix-sdk-event-cache.sqlite3") {
+            try? fm.removeItem(at: file)
+        }
     }
 
     /// Room ids currently being joined by `acceptLocalInvites` -- `rooms()` runs on every sync
