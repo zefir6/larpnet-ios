@@ -34,6 +34,11 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     ) {
         self.contentHandler = contentHandler
         bestAttemptContent = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
+        // One Notification Center group per room, also what ChatThreadViewModel clears when the
+        // room is opened. aps.badge (the server's unread-room count) passes through untouched.
+        if let roomId = request.content.userInfo["room_id"] as? String, !roomId.isEmpty {
+            bestAttemptContent?.threadIdentifier = roomId
+        }
 
         // Pull the two plain strings out of `request` before crossing into the `Task` closure --
         // `UNNotificationRequest` itself isn't `Sendable`, so capturing it directly here is what

@@ -29,6 +29,20 @@ struct ChatRoomInfoView: View {
                         )
                 }
             }
+            Section("Notifications") {
+                HStack {
+                    Text(viewModel.muted ? ChatMute.label(until: viewModel.mutedUntil) : "Notifications on")
+                    Spacer()
+                    Menu(viewModel.muted ? "Unmute" : "Mute") {
+                        ChatMuteMenuItems(
+                            muted: viewModel.muted,
+                            onMute: { duration in Task { await viewModel.mute(for: duration) } },
+                            onUnmute: { Task { await viewModel.unmute() } }
+                        )
+                    }
+                    .disabled(viewModel.isBusy)
+                }
+            }
             Section("Participants") {
                 ForEach(viewModel.members) { member in
                     HStack(spacing: 10) {

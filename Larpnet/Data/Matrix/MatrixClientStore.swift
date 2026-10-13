@@ -60,6 +60,14 @@ final class MatrixClientStore {
     /// modes (or the call failed): behave like private mode.
     private(set) var encryptionInfo: MatrixEncryptionInfo?
 
+    /// Number of rooms with unread messages, muted rooms excluded -- the same number Synapse
+    /// pushes as the badge (`counts.unread`, see friendica-larpnet's larpnet_matrix CLAUDE.md
+    /// "Chat notifications") and the web bubble shows. Recounted after every sync (see
+    /// `startSyncLoop`), so the Chat tab badge and the app icon are right without the chat
+    /// screen ever having been opened. Wired up by `AppContainer`.
+    var onUnreadCountChange: ((Int) -> Void)?
+    private var isRecountingUnread = false
+
     init(tokenStore: TokenStore, friendicaAPI: @escaping () throws -> FriendicaAPIClient) {
         self.tokenStore = tokenStore
         self.friendicaAPI = friendicaAPI
@@ -148,16 +156,20 @@ final class MatrixClientStore {
         let client = try await ensureClient()
         await acceptLocalInvites(client)
         var result: [ChatRoom] = []
+        let mutes = await muteStates(client)
         for room in client.rooms() where room.membership() == .joined {
             let name = await displayName(for: room)
             let (previewText, timestamp) = await preview(for: room)
-            let unreadCount = (try? await room.roomInfo().numUnreadMessages).map(Int.init) ?? 0
+            let muted = mutes.keys.contains(room.id())
+            let unreadCount = muted ? 0 : ((try? await room.roomInfo().numUnreadMessages).map(Int.init) ?? 0)
             let avatarUrl = await avatarUrl(for: room)
             result.append(ChatRoom(
                 id: room.id(), name: name, preview: previewText, timestamp: timestamp,
-                unreadCount: unreadCount, avatarUrl: avatarUrl
+                unreadCount: unreadCount, avatarUrl: avatarUrl,
+                muted: muted, mutedUntil: mutes[room.id()].flatMap { $0 }
             ))
         }
+        onUnreadCountChange?(result.filter { $0.unreadCount > 0 }.count)
         return result.sorted { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }
     }
 
@@ -777,14 +789,107 @@ final class MatrixClientStore {
         data.map { String(format: "%02x", $0) }.joined()
     }
 
+    // MARK: - Read receipts, unread counts, mute
+
+    /// Read receipt up to the newest event in `roomId` -- called by the thread screen while it is
+    /// on screen. Before this, no larpnet client sent receipts, so unread counts (and every
+    /// badge) only ever cleared when some other Matrix client marked the room read. Also what
+    /// makes Synapse send the badge-only push that updates the other devices' badges.
+    func markRoomRead(roomId: String) async {
+        guard let client = try? await ensureClient(), let room = try? client.getRoom(roomId: roomId) else { return }
+        try? await room.markAsRead(receiptType: .read)
+    }
+
+    /// The same name the room list shows for `roomId` -- for a thread opened from a
+    /// notification, which only knows the room id.
+    func roomDisplayName(roomId: String) async -> String? {
+        guard let client = try? await ensureClient(), let room = try? client.getRoom(roomId: roomId) else { return nil }
+        return await displayName(for: room)
+    }
+
+    /// Every muted room id -> when its mute ends (nil = permanent), read from local account
+    /// data: the per-room override push rules in `m.push_rules` (what `larpnet_matrix_set_mute()`
+    /// writes, and what Element/the Rust SDK call Mute -- a rule with no `notify` action), and
+    /// the expiries in `pl.larpnet.mute_until`. Same rule as the server's
+    /// `larpnet_matrix_list_mutes()` and the web client's `isRoomMuted()`.
+    private func muteStates(_ client: Client) async -> [String: Date?] {
+        guard
+            let rulesJson = try? await client.accountData(eventType: "m.push_rules"),
+            let rules = try? JSONSerialization.jsonObject(with: Data(rulesJson.utf8)) as? [String: Any],
+            let overrides = (rules["global"] as? [String: Any])?["override"] as? [[String: Any]]
+        else { return [:] }
+        var expiries: [String: Any] = [:]
+        if let json = try? await client.accountData(eventType: Self.muteAccountDataType),
+           let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+           let rooms = object["rooms"] as? [String: Any] {
+            expiries = rooms
+        }
+
+        var result: [String: Date?] = [:]
+        for rule in overrides {
+            guard let id = rule["rule_id"] as? String, id.hasPrefix("!") else { continue }
+            if (rule["enabled"] as? Bool) == false { continue }
+            let notifies = (rule["actions"] as? [Any])?.contains { ($0 as? String) == "notify" } ?? false
+            if !notifies {
+                result[id] = (expiries[id] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
+            }
+        }
+        return result
+    }
+
+    /// Muted state of one room, for the room info screen.
+    func muteState(roomId: String) async -> (muted: Bool, until: Date?) {
+        guard let client = try? await ensureClient() else { return (false, nil) }
+        let mutes = await muteStates(client)
+        return (mutes.keys.contains(roomId), mutes[roomId].flatMap { $0 })
+    }
+
+    /// Mutes `roomId` until `until` (nil = until unmuted) via `POST larpnet_matrix/mute`, and
+    /// returns the server's updated mute map so the caller can show the change right away; the
+    /// push rule itself arrives over sync shortly after.
+    func muteRoom(roomId: String, until: Date?) async throws -> [String: Date?] {
+        let millis = until.map { Int64($0.timeIntervalSince1970 * 1000) }
+        return Self.dates(try await friendicaAPI().matrixMute(action: "mute", roomId: roomId, untilMillis: millis).mutes)
+    }
+
+    func unmuteRoom(roomId: String) async throws -> [String: Date?] {
+        Self.dates(try await friendicaAPI().matrixMute(action: "unmute", roomId: roomId).mutes)
+    }
+
+    private static func dates(_ mutes: [String: Int64?]) -> [String: Date?] {
+        mutes.mapValues { $0.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+    }
+
+    private static let muteAccountDataType = "pl.larpnet.mute_until"
+
+    /// Recomputes the unread-room count for `onUnreadCountChange`; skipped while one is already
+    /// running (that one reads the latest state anyway).
+    private func recountUnread(_ client: Client) async {
+        guard !isRecountingUnread else { return }
+        isRecountingUnread = true
+        defer { isRecountingUnread = false }
+        let mutes = await muteStates(client)
+        var count = 0
+        for room in client.rooms() where room.membership() == .joined && !mutes.keys.contains(room.id()) {
+            if let unread = try? await room.roomInfo().numUnreadMessages, unread > 0 {
+                count += 1
+            }
+        }
+        onUnreadCountChange?(count)
+    }
+
     // MARK: - Private
 
     private func startSyncLoop(_ client: Client) {
         syncHandle?.cancel()
         let bridge = SyncTickBridge { [weak self] in
-            Task { @MainActor in self?.roomListContinuation?.yield() }
+            Task { @MainActor in
+                self?.roomListContinuation?.yield()
+                await self?.recountUnread(client)
+            }
         }
         syncHandle = client.syncV2(settings: SyncSettingsV2(fullState: false), listener: bridge)
+        Task { await recountUnread(client) }
     }
 
     private func deviceId() -> String {

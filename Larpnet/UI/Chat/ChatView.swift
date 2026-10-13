@@ -28,6 +28,14 @@ struct ChatView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 }
+                // Long-press: the shared per-room mute (same as Chat info and the web client).
+                .contextMenu {
+                    ChatMuteMenuItems(
+                        muted: room.muted,
+                        onMute: { duration in Task { await viewModel.mute(room, for: duration) } },
+                        onUnmute: { Task { await viewModel.unmute(room) } }
+                    )
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -113,6 +121,12 @@ private struct ChatRoomRow: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 4) {
+                if room.muted {
+                    Image(systemName: "bell.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(ChatMute.label(until: room.mutedUntil))
+                }
                 if showTimestamps, let timestamp = room.timestamp {
                     Text(RelativeTime.short(from: timestamp))
                         .font(.caption)

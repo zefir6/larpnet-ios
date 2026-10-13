@@ -67,3 +67,9 @@ struct MatrixEncryptionInfo: Decodable, Sendable, Equatable {
     var isPrivate: Bool { mode == "private" }
     var isPending: Bool { state == "pending" }
 }
+
+/// `POST /larpnet_matrix/mute`'s answer: every muted room id -> epoch millis its mute ends, or
+/// nil when permanent.
+struct MatrixMutesResponse: Decodable, Sendable {
+    let mutes: [String: Int64?]
+}

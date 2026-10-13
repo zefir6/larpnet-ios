@@ -43,6 +43,25 @@ struct RootView: View {
         .sheet(item: $composeContext) { context in
             ComposeView(context: context, appContainer: appContainer, onPosted: {})
         }
+        // A tapped chat notification -- presented over whatever tab is showing, so it works
+        // wherever (or whether) Chat sits in the user's navigation layout.
+        .sheet(item: Binding(
+            get: { appContainer.chatBadgeStore.pendingRoomId.map(PendingChatRoom.init) },
+            set: { appContainer.chatBadgeStore.pendingRoomId = $0?.id }
+        )) { pending in
+            NavigationStack {
+                ChatThreadView(
+                    target: .room(id: pending.id, name: ""), appContainer: appContainer,
+                    onOpenInfo: { _ in }
+                )
+                .larpnetNavigationBarStyle()
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") { appContainer.chatBadgeStore.pendingRoomId = nil }
+                    }
+                }
+            }
+        }
     }
 
     /// Maps a destination living in the bottom bar to *its own* dedicated path binding -- fixed
@@ -410,4 +429,9 @@ struct RootView: View {
                 }
         }
     }
+}
+
+/// `Identifiable` wrapper for `ChatBadgeStore.pendingRoomId`, for `.sheet(item:)`.
+private struct PendingChatRoom: Identifiable {
+    let id: String
 }
