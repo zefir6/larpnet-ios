@@ -119,9 +119,11 @@ final class ChatThreadViewModel {
 
     /// Read receipt for the newest message, once per new message while on screen.
     private func markReadIfVisible() {
-        guard isVisible, let roomId, let newest = messages.last?.id, newest != lastReadMessageId else { return }
+        guard isVisible, let handle,
+              let newest = messages.last(where: { $0.eventId != nil })?.eventId,
+              newest != lastReadMessageId else { return }
         lastReadMessageId = newest
-        Task { await appContainer.matrixClientStore.markRoomRead(roomId: roomId) }
+        Task { try? await handle.sendReadReceipt(eventId: newest) }
     }
 
     /// The NSE groups a room's pushes under `threadIdentifier = roomId`; opening the room

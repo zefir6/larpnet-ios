@@ -161,7 +161,7 @@ final class MatrixClientStore {
             let name = await displayName(for: room)
             let (previewText, timestamp) = await preview(for: room)
             let muted = mutes.keys.contains(room.id())
-            let unreadCount = muted ? 0 : ((try? await room.roomInfo().numUnreadMessages).map(Int.init) ?? 0)
+            let unreadCount = muted ? 0 : await Self.unreadCount(of: room)
             let avatarUrl = await avatarUrl(for: room)
             result.append(ChatRoom(
                 id: room.id(), name: name, preview: previewText, timestamp: timestamp,
@@ -791,13 +791,12 @@ final class MatrixClientStore {
 
     // MARK: - Read receipts, unread counts, mute
 
-    /// Read receipt up to the newest event in `roomId` -- called by the thread screen while it is
-    /// on screen. Before this, no larpnet client sent receipts, so unread counts (and every
-    /// badge) only ever cleared when some other Matrix client marked the room read. Also what
-    /// makes Synapse send the badge-only push that updates the other devices' badges.
-    func markRoomRead(roomId: String) async {
-        guard let client = try? await ensureClient(), let room = try? client.getRoom(roomId: roomId) else { return }
-        try? await room.markAsRead(receiptType: .read)
+    /// Synapse's own notification count for `room` (what every other client's badge shows; 0
+    /// for a muted room, whose push rule has no `notify`). Not `numUnreadMessages`: that is
+    /// computed from the SDK's event cache, which the plain v2 sync this app uses never fills,
+    /// so it stayed 0 (same finding as larpnet-android, 2026-10-13).
+    static func unreadCount(of room: Room) async -> Int {
+        ((try? await room.roomInfo().notificationCount).map(Int.init)) ?? 0
     }
 
     /// The same name the room list shows for `roomId` -- for a thread opened from a
@@ -871,7 +870,7 @@ final class MatrixClientStore {
         let mutes = await muteStates(client)
         var count = 0
         for room in client.rooms() where room.membership() == .joined && !mutes.keys.contains(room.id()) {
-            if let unread = try? await room.roomInfo().numUnreadMessages, unread > 0 {
+            if await Self.unreadCount(of: room) > 0 {
                 count += 1
             }
         }
@@ -1008,6 +1007,15 @@ final class ChatTimelineHandle {
         }
     }
 
+    /// Read receipt for `eventId` (the newest message on screen). An explicit event id rather
+    /// than `Timeline/Room.markAsRead`: both pick "newest event" from the SDK's event cache,
+    /// which plain v2 sync never fills, so they silently sent nothing (confirmed on
+    /// larpnet-android, 2026-10-13). Before this, no larpnet client sent receipts at all, so
+    /// unread counts only cleared when another Matrix client marked the room read.
+    func sendReadReceipt(eventId: String) async throws {
+        try await timeline.sendReadReceipt(receiptType: .read, eventId: eventId)
+    }
+
     func send(text: String) async throws {
         _ = try await timeline.send(msg: messageEventContentFromMarkdown(md: text))
     }
@@ -1057,6 +1065,7 @@ final class ChatTimelineHandle {
         }
         return ChatMessage(
             id: item.uniqueId().id, isOwn: event.isOwn, body: body,
+            eventId: { if case .eventId(let id) = event.eventOrTransactionId { return id } else { return nil } }(),
             timestamp: Date(timeIntervalSince1970: Double(event.timestamp) / 1000),
             senderId: event.isOwn ? nil : event.sender,
             senderDisplayName: event.isOwn ? nil : resolveDisplayName(event.sender, sdkDisplayName),

@@ -9,7 +9,7 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     let name: String
     let preview: String?
     let timestamp: Date?
-    /// "Interesting" unread message count from `Room.roomInfo().numUnreadMessages` -- drives
+    /// Synapse's notification count (`MatrixClientStore.unreadCount(of:)`) -- drives
     /// the room row's unread styling and the Chat tab's badge. Always 0 for a `muted` room, same
     /// as Synapse's own notification count (and so every other client's badge).
     let unreadCount: Int
@@ -29,6 +29,9 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     let id: String
     let isOwn: Bool
     let body: String
+    /// The event's id once the server has it; nil for a local echo still sending. What a read
+    /// receipt points at (see `ChatTimelineHandle.sendReadReceipt(eventId:)`).
+    let eventId: String?
     let timestamp: Date
     /// Sender mxid and display name, from `EventTimelineItem.sender`/`senderProfile` -- nil for
     /// `isOwn` messages (the composer already knows who "you" are). Used to attribute and
