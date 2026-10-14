@@ -60,6 +60,14 @@ final class MatrixClientStore {
     /// modes (or the call failed): behave like private mode.
     private(set) var encryptionInfo: MatrixEncryptionInfo?
 
+    /// Number of rooms with unread messages, muted rooms excluded -- the same number Synapse
+    /// pushes as the badge (`counts.unread`, see friendica-larpnet's larpnet_matrix CLAUDE.md
+    /// "Chat notifications") and the web bubble shows. Recounted after every sync (see
+    /// `startSyncLoop`), so the Chat tab badge and the app icon are right without the chat
+    /// screen ever having been opened. Wired up by `AppContainer`.
+    var onUnreadCountChange: ((Int) -> Void)?
+    private var isRecountingUnread = false
+
     init(tokenStore: TokenStore, friendicaAPI: @escaping () throws -> FriendicaAPIClient) {
         self.tokenStore = tokenStore
         self.friendicaAPI = friendicaAPI
@@ -98,6 +106,10 @@ final class MatrixClientStore {
         }
 
         let sessionDir = try MatrixSessionPaths.sessionDirectory(for: identity.userId)
+        if tokenStore.matrixEventCacheResetVersion < Self.matrixEventCacheResetVersion {
+            Self.discardEventCache(in: sessionDir)
+            tokenStore.matrixEventCacheResetVersion = Self.matrixEventCacheResetVersion
+        }
         let newClient = try await ClientBuilder()
             .homeserverUrl(url: identity.homeserver)
             .sessionPaths(dataPath: sessionDir.path, cachePath: sessionDir.path)
@@ -111,11 +123,46 @@ final class MatrixClientStore {
         // against the throwaway `MatrixChatSpikeTests` this store supersedes: without this,
         // a caller that logs in and immediately checks `rooms()` races an empty local store.
         // The continuous background loop below is what keeps that state live afterward.
+        await Self.startEventCache(newClient)
         _ = try await newClient.syncOnceV2(settings: SyncSettingsV2(fullState: true))
+        // Fresh store: there was no room to open a timeline on until now. Nothing was cached
+        // before this either, so nothing is missing -- an empty cache paginates from the end.
+        await Self.startEventCache(newClient)
 
         client = newClient
         startSyncLoop(newClient)
         return newClient
+    }
+
+    /// Makes the SDK's event cache (where every room timeline reads its events from) start
+    /// recording synced events. The SDK only does that once some room's timeline has been
+    /// built, and the plain v2 sync this app uses never builds one -- so everything synced
+    /// before the first chat was opened in a run went unrecorded. A room that already had
+    /// cached events then showed those and nothing newer, for good: back-pagination only fills
+    /// in *before* the oldest cached event (found on larpnet-android, 2026-10-13: a message
+    /// received while the app was closed never appeared, even after reopening the room).
+    ///
+    /// The FFI has no direct call for this, so: build one room's timeline and drop it right
+    /// away -- the subscription it starts lasts as long as the client. No-op with no rooms yet.
+    private static func startEventCache(_ client: Client) async {
+        guard let room = client.rooms().first else { return }
+        _ = try? await room.timeline()
+    }
+
+    /// Bump to make every install drop its local timeline cache once -- see
+    /// `discardEventCache(in:)`. 1 = caches written before `startEventCache(_:)` existed, which
+    /// can be missing messages (2026-10-13).
+    private static let matrixEventCacheResetVersion = 1
+
+    /// One-time removal of the event cache database (only the timeline cache -- not the crypto
+    /// or state stores), for caches written before `startEventCache(_:)` existed. The SDK
+    /// recreates it empty and refills it from the server. Must run before the client is built.
+    private static func discardEventCache(in sessionDir: URL) {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: sessionDir, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("matrix-sdk-event-cache.sqlite3") {
+            try? fm.removeItem(at: file)
+        }
     }
 
     /// Room ids currently being joined by `acceptLocalInvites` -- `rooms()` runs on every sync
@@ -148,16 +195,20 @@ final class MatrixClientStore {
         let client = try await ensureClient()
         await acceptLocalInvites(client)
         var result: [ChatRoom] = []
+        let mutes = await muteStates(client)
         for room in client.rooms() where room.membership() == .joined {
             let name = await displayName(for: room)
             let (previewText, timestamp) = await preview(for: room)
-            let unreadCount = (try? await room.roomInfo().numUnreadMessages).map(Int.init) ?? 0
+            let muted = mutes.keys.contains(room.id())
+            let unreadCount = muted ? 0 : await Self.unreadCount(of: room)
             let avatarUrl = await avatarUrl(for: room)
             result.append(ChatRoom(
                 id: room.id(), name: name, preview: previewText, timestamp: timestamp,
-                unreadCount: unreadCount, avatarUrl: avatarUrl
+                unreadCount: unreadCount, avatarUrl: avatarUrl,
+                muted: muted, mutedUntil: mutes[room.id()].flatMap { $0 }
             ))
         }
+        onUnreadCountChange?(result.filter { $0.unreadCount > 0 }.count)
         return result.sorted { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }
     }
 
@@ -777,14 +828,106 @@ final class MatrixClientStore {
         data.map { String(format: "%02x", $0) }.joined()
     }
 
+    // MARK: - Read receipts, unread counts, mute
+
+    /// Synapse's own notification count for `room` (what every other client's badge shows; 0
+    /// for a muted room, whose push rule has no `notify`). Not `numUnreadMessages`: that is
+    /// computed from the SDK's event cache, which the plain v2 sync this app uses never fills,
+    /// so it stayed 0 (same finding as larpnet-android, 2026-10-13).
+    static func unreadCount(of room: Room) async -> Int {
+        ((try? await room.roomInfo().notificationCount).map(Int.init)) ?? 0
+    }
+
+    /// The same name the room list shows for `roomId` -- for a thread opened from a
+    /// notification, which only knows the room id.
+    func roomDisplayName(roomId: String) async -> String? {
+        guard let client = try? await ensureClient(), let room = try? client.getRoom(roomId: roomId) else { return nil }
+        return await displayName(for: room)
+    }
+
+    /// Every muted room id -> when its mute ends (nil = permanent), read from local account
+    /// data: the per-room override push rules in `m.push_rules` (what `larpnet_matrix_set_mute()`
+    /// writes, and what Element/the Rust SDK call Mute -- a rule with no `notify` action), and
+    /// the expiries in `pl.larpnet.mute_until`. Same rule as the server's
+    /// `larpnet_matrix_list_mutes()` and the web client's `isRoomMuted()`.
+    private func muteStates(_ client: Client) async -> [String: Date?] {
+        guard
+            let rulesJson = try? await client.accountData(eventType: "m.push_rules"),
+            let rules = try? JSONSerialization.jsonObject(with: Data(rulesJson.utf8)) as? [String: Any],
+            let overrides = (rules["global"] as? [String: Any])?["override"] as? [[String: Any]]
+        else { return [:] }
+        var expiries: [String: Any] = [:]
+        if let json = try? await client.accountData(eventType: Self.muteAccountDataType),
+           let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+           let rooms = object["rooms"] as? [String: Any] {
+            expiries = rooms
+        }
+
+        var result: [String: Date?] = [:]
+        for rule in overrides {
+            guard let id = rule["rule_id"] as? String, id.hasPrefix("!") else { continue }
+            if (rule["enabled"] as? Bool) == false { continue }
+            let notifies = (rule["actions"] as? [Any])?.contains { ($0 as? String) == "notify" } ?? false
+            if !notifies {
+                result[id] = (expiries[id] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
+            }
+        }
+        return result
+    }
+
+    /// Muted state of one room, for the room info screen.
+    func muteState(roomId: String) async -> (muted: Bool, until: Date?) {
+        guard let client = try? await ensureClient() else { return (false, nil) }
+        let mutes = await muteStates(client)
+        return (mutes.keys.contains(roomId), mutes[roomId].flatMap { $0 })
+    }
+
+    /// Mutes `roomId` until `until` (nil = until unmuted) via `POST larpnet_matrix/mute`, and
+    /// returns the server's updated mute map so the caller can show the change right away; the
+    /// push rule itself arrives over sync shortly after.
+    func muteRoom(roomId: String, until: Date?) async throws -> [String: Date?] {
+        let millis = until.map { Int64($0.timeIntervalSince1970 * 1000) }
+        return Self.dates(try await friendicaAPI().matrixMute(action: "mute", roomId: roomId, untilMillis: millis).mutes)
+    }
+
+    func unmuteRoom(roomId: String) async throws -> [String: Date?] {
+        Self.dates(try await friendicaAPI().matrixMute(action: "unmute", roomId: roomId).mutes)
+    }
+
+    private static func dates(_ mutes: [String: Int64?]) -> [String: Date?] {
+        mutes.mapValues { $0.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+    }
+
+    private static let muteAccountDataType = "pl.larpnet.mute_until"
+
+    /// Recomputes the unread-room count for `onUnreadCountChange`; skipped while one is already
+    /// running (that one reads the latest state anyway).
+    private func recountUnread(_ client: Client) async {
+        guard !isRecountingUnread else { return }
+        isRecountingUnread = true
+        defer { isRecountingUnread = false }
+        let mutes = await muteStates(client)
+        var count = 0
+        for room in client.rooms() where room.membership() == .joined && !mutes.keys.contains(room.id()) {
+            if await Self.unreadCount(of: room) > 0 {
+                count += 1
+            }
+        }
+        onUnreadCountChange?(count)
+    }
+
     // MARK: - Private
 
     private func startSyncLoop(_ client: Client) {
         syncHandle?.cancel()
         let bridge = SyncTickBridge { [weak self] in
-            Task { @MainActor in self?.roomListContinuation?.yield() }
+            Task { @MainActor in
+                self?.roomListContinuation?.yield()
+                await self?.recountUnread(client)
+            }
         }
         syncHandle = client.syncV2(settings: SyncSettingsV2(fullState: false), listener: bridge)
+        Task { await recountUnread(client) }
     }
 
     private func deviceId() -> String {
@@ -903,6 +1046,15 @@ final class ChatTimelineHandle {
         }
     }
 
+    /// Read receipt for `eventId` (the newest message on screen). An explicit event id rather
+    /// than `Timeline/Room.markAsRead`: both pick "newest event" from the SDK's event cache,
+    /// which plain v2 sync never fills, so they silently sent nothing (confirmed on
+    /// larpnet-android, 2026-10-13). Before this, no larpnet client sent receipts at all, so
+    /// unread counts only cleared when another Matrix client marked the room read.
+    func sendReadReceipt(eventId: String) async throws {
+        try await timeline.sendReadReceipt(receiptType: .read, eventId: eventId)
+    }
+
     func send(text: String) async throws {
         _ = try await timeline.send(msg: messageEventContentFromMarkdown(md: text))
     }
@@ -952,6 +1104,7 @@ final class ChatTimelineHandle {
         }
         return ChatMessage(
             id: item.uniqueId().id, isOwn: event.isOwn, body: body,
+            eventId: { if case .eventId(let id) = event.eventOrTransactionId { return id } else { return nil } }(),
             timestamp: Date(timeIntervalSince1970: Double(event.timestamp) / 1000),
             senderId: event.isOwn ? nil : event.sender,
             senderDisplayName: event.isOwn ? nil : resolveDisplayName(event.sender, sdkDisplayName),

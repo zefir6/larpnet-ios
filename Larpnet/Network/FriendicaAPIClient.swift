@@ -464,6 +464,17 @@ final class FriendicaAPIClient: Sendable {
         try await send(path: "larpnet_matrix/encryption", method: "POST", query: [URLQueryItem(name: "action", value: action)])
     }
 
+    /// `POST /larpnet_matrix/mute` (`larpnet_matrix_mute_endpoint()`) -- the shared per-room mute
+    /// the web and Android clients use too: a Matrix push rule written server-side, so a timed
+    /// mute also ends with no client running. `action` is `list`, `mute` (with `untilMillis`, or
+    /// none for permanent) or `unmute`.
+    func matrixMute(action: String, roomId: String? = nil, untilMillis: Int64? = nil) async throws -> MatrixMutesResponse {
+        var query = [URLQueryItem(name: "action", value: action)]
+        if let roomId { query.append(URLQueryItem(name: "room_id", value: roomId)) }
+        if let untilMillis { query.append(URLQueryItem(name: "until", value: String(untilMillis))) }
+        return try await send(path: "larpnet_matrix/mute", method: "POST", query: query)
+    }
+
     // MARK: - Classic notification push (APNs)
 
     /// `POST /larpnet_apns` -- the `larpnet_apns` addon's device-token registration endpoint,

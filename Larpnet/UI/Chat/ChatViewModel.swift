@@ -39,8 +39,8 @@ final class ChatViewModel {
 
     func refresh() async {
         do {
+            // rooms() also updates the badge, via MatrixClientStore.onUnreadCountChange.
             rooms = try await appContainer.matrixClientStore.rooms()
-            appContainer.chatBadgeStore.totalUnreadCount = rooms.reduce(0) { $0 + $1.unreadCount }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -62,6 +62,31 @@ final class ChatViewModel {
         } catch {
             errorMessage = String(describing: error)
             await refresh()
+        }
+    }
+
+    /// Mutes `room` for `duration` (nil = until unmuted) from the row's context menu. The
+    /// server's answer is applied to the row at once; sync confirms it shortly after.
+    func mute(_ room: ChatRoom, for duration: TimeInterval?) async {
+        await updateMute { try await $0.muteRoom(roomId: room.id, until: duration.map { Date().addingTimeInterval($0) }) }
+    }
+
+    func unmute(_ room: ChatRoom) async {
+        await updateMute { try await $0.unmuteRoom(roomId: room.id) }
+    }
+
+    private func updateMute(_ call: (MatrixClientStore) async throws -> [String: Date?]) async {
+        do {
+            let mutes = try await call(appContainer.matrixClientStore)
+            rooms = rooms.map { room in
+                var updated = room
+                updated.muted = mutes.keys.contains(room.id)
+                updated.mutedUntil = mutes[room.id].flatMap { $0 }
+                return updated
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
         }
     }
 

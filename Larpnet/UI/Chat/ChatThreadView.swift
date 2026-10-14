@@ -4,6 +4,7 @@ struct ChatThreadView: View {
     @State private var viewModel: ChatThreadViewModel
     @State private var isAtBottom = true
     @State private var pendingNewMessages = 0
+    @Environment(\.scenePhase) private var scenePhase
     private let appContainer: AppContainer
     let onOpenInfo: (String) -> Void
 
@@ -109,7 +110,12 @@ struct ChatThreadView: View {
             }
         }
         .task { await viewModel.load() }
-        .onDisappear { viewModel.close() }
+        .onAppear { viewModel.setVisible(scenePhase == .active) }
+        .onChange(of: scenePhase) { _, phase in viewModel.setVisible(phase == .active) }
+        .onDisappear {
+            viewModel.setVisible(false)
+            viewModel.close()
+        }
     }
 
     @ViewBuilder

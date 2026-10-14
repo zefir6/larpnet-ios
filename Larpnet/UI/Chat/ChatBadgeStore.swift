@@ -1,10 +1,16 @@
 import Foundation
 
-/// Total unread-message count across all Matrix chat rooms, for the Chat tab's badge --
-/// `ChatViewModel` writes to this every time it refreshes the room list, and `RootView` reads it
-/// to badge the tab regardless of whether Chat is the currently-visible tab.
+/// Shared chat state outside any one screen:
+/// - `totalUnreadCount`: rooms with unread messages (muted excluded), for the Chat tab badge --
+///   written by `MatrixClientStore.onUnreadCountChange` (wired in `LarpnetApp`) after every
+///   sync, so it's right before the Chat tab is ever opened.
+/// - `visibleRoomId`: the room `ChatThreadView` is showing while the app is active --
+///   `AppDelegate` shows no banner for a push from that room.
+/// - `pendingRoomId`: a room to open from a tapped chat notification (`RootView` presents it).
 @MainActor
 @Observable
 final class ChatBadgeStore {
     var totalUnreadCount = 0
+    var visibleRoomId: String?
+    var pendingRoomId: String?
 }

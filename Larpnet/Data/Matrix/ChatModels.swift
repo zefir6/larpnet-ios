@@ -9,13 +9,19 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     let name: String
     let preview: String?
     let timestamp: Date?
-    /// "Interesting" unread message count from `Room.roomInfo().numUnreadMessages` -- drives
-    /// the room row's unread styling and the Chat tab's badge total.
+    /// Synapse's notification count (`MatrixClientStore.unreadCount(of:)`) -- drives
+    /// the room row's unread styling and the Chat tab's badge. Always 0 for a `muted` room, same
+    /// as Synapse's own notification count (and so every other client's badge).
     let unreadCount: Int
     /// `mxc://` room avatar, from `Room.avatarUrl()` (falling back to the 1:1 hero's own avatar
     /// when the room itself has none) -- resolved to a real image via
     /// `MatrixClientStore.avatarThumbnail(mxcUrl:)`, not just an initials placeholder.
     let avatarUrl: String?
+    /// Muted via the shared per-room mute (`POST larpnet_matrix/mute`, a Matrix push rule) --
+    /// see `MatrixClientStore.muteStates(_:)`.
+    var muted: Bool = false
+    /// When a timed mute ends; nil when permanent or not muted.
+    var mutedUntil: Date?
 }
 
 /// One message in a room's timeline -- `ChatTimelineHandle`'s output shape.
@@ -23,6 +29,9 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     let id: String
     let isOwn: Bool
     let body: String
+    /// The event's id once the server has it; nil for a local echo still sending. What a read
+    /// receipt points at (see `ChatTimelineHandle.sendReadReceipt(eventId:)`).
+    let eventId: String?
     let timestamp: Date
     /// Sender mxid and display name, from `EventTimelineItem.sender`/`senderProfile` -- nil for
     /// `isOwn` messages (the composer already knows who "you" are). Used to attribute and

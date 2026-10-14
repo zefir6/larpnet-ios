@@ -160,6 +160,12 @@ final class TokenStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "matrix_session_reset_version") }
     }
 
+    /// Last one-time chat timeline cache reset -- see `MatrixClientStore.discardEventCache(in:)`.
+    var matrixEventCacheResetVersion: Int {
+        get { defaults.integer(forKey: "matrix_event_cache_reset_version") }
+        set { defaults.set(newValue, forKey: "matrix_event_cache_reset_version") }
+    }
+
     /// `pushEnabled` is not a secret -- kept in `UserDefaults`, and deliberately *not* cleared
     /// by `clear()`, matching Android's `TokenStore.pushEnabled` (survives logout).
     var pushEnabled: Bool {

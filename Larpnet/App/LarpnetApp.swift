@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct LarpnetApp: App {
@@ -24,6 +25,11 @@ struct LarpnetApp: App {
         // which can fire at any point after `registerForRemoteNotifications()` is called, is
         // guaranteed to see this set.
         appDelegate.appContainer = container
+        // Chat badge: Chat tab + app icon, updated after every Matrix sync.
+        container.matrixClientStore.onUnreadCountChange = { [weak container] count in
+            container?.chatBadgeStore.totalUnreadCount = count
+            UNUserNotificationCenter.current().setBadgeCount(count)
+        }
     }
 
     var body: some Scene {
@@ -65,6 +71,9 @@ struct LarpnetApp: App {
                 if let account = try? await appContainer.friendicaAPI().verifyCredentials() {
                     appContainer.currentAccountStore.set(account.id)
                 }
+                // Start chat in the background at launch, not only when the Chat tab first
+                // opens, so the unread badge is right from the start.
+                try? await appContainer.matrixClientStore.ensureClient()
             }
         }
     }

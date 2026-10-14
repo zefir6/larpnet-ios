@@ -13,6 +13,9 @@ final class ChatRoomInfoViewModel {
     private(set) var isGroup = false
     private(set) var rawName = ""
     private(set) var didLeave = false
+    private(set) var muted = false
+    /// When a timed mute ends; nil when permanent or not muted.
+    private(set) var mutedUntil: Date?
     var nameInput = ""
     var errorMessage: String?
 
@@ -33,6 +36,7 @@ final class ChatRoomInfoViewModel {
             isGroup = info.isGroup
             rawName = info.rawName
             nameInput = info.rawName
+            (muted, mutedUntil) = await appContainer.matrixClientStore.muteState(roomId: roomId)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -60,6 +64,28 @@ final class ChatRoomInfoViewModel {
             try await appContainer.matrixClientStore.removeMember(roomId: roomId, userId: userId)
             errorMessage = nil
             await load()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    /// Mutes for `duration` from now, or until unmuted when nil.
+    func mute(for duration: TimeInterval?) async {
+        await updateMute { try await $0.muteRoom(roomId: self.roomId, until: duration.map { Date().addingTimeInterval($0) }) }
+    }
+
+    func unmute() async {
+        await updateMute { try await $0.unmuteRoom(roomId: self.roomId) }
+    }
+
+    private func updateMute(_ call: (MatrixClientStore) async throws -> [String: Date?]) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let mutes = try await call(appContainer.matrixClientStore)
+            muted = mutes.keys.contains(roomId)
+            mutedUntil = mutes[roomId].flatMap { $0 }
+            errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }

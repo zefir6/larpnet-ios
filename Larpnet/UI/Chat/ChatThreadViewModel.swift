@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// Either an already-known room (opened from the room list, which already has its display
 /// name), a bare Friendica nickname (opened from a profile's "Chat" button or the new-chat
@@ -42,6 +43,10 @@ final class ChatThreadViewModel {
     private let appContainer: AppContainer
     private var handle: ChatTimelineHandle?
     private var messagesTask: Task<Void, Never>?
+    /// On screen with the app active -- read receipts only go out then, so a message that
+    /// arrives while the app is in the background stays unread.
+    private var isVisible = false
+    private var lastReadMessageId: String?
 
     init(target: ChatThreadTarget, appContainer: AppContainer) {
         self.target = target
@@ -57,6 +62,10 @@ final class ChatThreadViewModel {
             case .room(let id, let name):
                 resolvedRoomId = id
                 roomName = name
+                // Opened from a chat notification, which only knows the room id.
+                if name.isEmpty {
+                    roomName = await appContainer.matrixClientStore.roomDisplayName(roomId: id)
+                }
             case .nickname(let nickname):
                 roomName = nickname
                 resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(nickname: nickname)
@@ -65,12 +74,14 @@ final class ChatThreadViewModel {
                 resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(matrixId: matrixId)
             }
             roomId = resolvedRoomId
+            if isVisible { setVisible(true) }
             isGroup = (try? await appContainer.matrixClientStore.roomInfo(roomId: resolvedRoomId).isGroup) ?? false
             let newHandle = try await appContainer.matrixClientStore.openTimeline(roomId: resolvedRoomId)
             handle = newHandle
             messagesTask = Task { [weak self] in
                 for await snapshot in newHandle.messages {
                     self?.messages = snapshot
+                    self?.markReadIfVisible()
                 }
             }
             errorMessage = nil
@@ -90,6 +101,39 @@ final class ChatThreadViewModel {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    /// Called by the view on appear/disappear and scene-phase changes.
+    func setVisible(_ visible: Bool) {
+        isVisible = visible
+        let badgeStore = appContainer.chatBadgeStore
+        if visible, let roomId {
+            badgeStore.visibleRoomId = roomId
+            lastReadMessageId = nil
+            markReadIfVisible()
+            Task { await Self.removeDeliveredNotifications(roomId: roomId) }
+        } else if !visible, badgeStore.visibleRoomId == roomId {
+            badgeStore.visibleRoomId = nil
+        }
+    }
+
+    /// Read receipt for the newest message, once per new message while on screen.
+    private func markReadIfVisible() {
+        guard isVisible, let handle,
+              let newest = messages.last(where: { $0.eventId != nil })?.eventId,
+              newest != lastReadMessageId else { return }
+        lastReadMessageId = newest
+        Task { try? await handle.sendReadReceipt(eventId: newest) }
+    }
+
+    /// The NSE groups a room's pushes under `threadIdentifier = roomId`; opening the room
+    /// clears them from Notification Center.
+    private static func removeDeliveredNotifications(roomId: String) async {
+        let center = UNUserNotificationCenter.current()
+        let ids = await center.deliveredNotifications()
+            .filter { $0.request.content.threadIdentifier == roomId }
+            .map(\.request.identifier)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
     }
 
     func close() {
