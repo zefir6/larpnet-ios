@@ -17,6 +17,10 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     /// when the room itself has none) -- resolved to a real image via
     /// `MatrixClientStore.avatarThumbnail(mxcUrl:)`, not just an initials placeholder.
     let avatarUrl: String?
+    /// The other member's mxid for a 1:1 room without its own avatar, nil otherwise -- the
+    /// Friendica profile photo is looked up from this first (see
+    /// `MatrixClientStore.friendicaAvatarURL(userId:)`).
+    var peerUserId: String?
     /// Muted via the shared per-room mute (`POST larpnet_matrix/mute`, a Matrix push rule) --
     /// see `MatrixClientStore.muteStates(_:)`.
     var muted: Bool = false
@@ -62,4 +66,20 @@ struct ChatRoomInfo: Sendable {
     let rawName: String
     let isGroup: Bool
     let members: [ChatRoomMember]
+    /// The room's own `mxc://` avatar, if one is set (group rooms only, in practice).
+    var avatarUrl: String?
+}
+
+/// Chat name style setting -- `rawValue` is what's stored under `defaultsKey`, same strings as
+/// larpnet-android's `ChatNameDisplay`.
+enum ChatNameDisplay: String, CaseIterable, Sendable {
+    case full
+    case handle
+    case both
+
+    static let defaultsKey = "chat_name_display"
+
+    static var current: ChatNameDisplay {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(ChatNameDisplay.init(rawValue:)) ?? .full
+    }
 }

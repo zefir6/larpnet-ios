@@ -28,6 +28,10 @@ final class ChatThreadViewModel {
     /// a sender avatar/name (group chats only; a 1:1's incoming sender is already obvious from
     /// the room itself).
     private(set) var isGroup = false
+    /// Header avatar: the room's own `mxc://` avatar (groups) or the 1:1 partner's, plus the
+    /// partner's mxid for the Friendica-photo lookup (see `MatrixAvatarView`).
+    private(set) var avatarUrl: String?
+    private(set) var peerUserId: String?
     private(set) var isLoading = false
     private(set) var isSending = false
     var draft: String = ""
@@ -69,13 +73,23 @@ final class ChatThreadViewModel {
             case .nickname(let nickname):
                 roomName = nickname
                 resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(nickname: nickname)
+                // Placeholder only: a profile's "Chat" button knows just this. Swap in the same
+                // name the room list shows (full name by default).
+                roomName = await appContainer.matrixClientStore.roomDisplayName(roomId: resolvedRoomId) ?? roomName
             case .matrixId(let matrixId):
                 roomName = matrixId
                 resolvedRoomId = try await appContainer.matrixClientStore.openOrCreateDirectRoom(matrixId: matrixId)
+                // Placeholder only: a profile's "Chat" button knows just this. Swap in the same
+                // name the room list shows (full name by default).
+                roomName = await appContainer.matrixClientStore.roomDisplayName(roomId: resolvedRoomId) ?? roomName
             }
             roomId = resolvedRoomId
             if isVisible { setVisible(true) }
-            isGroup = (try? await appContainer.matrixClientStore.roomInfo(roomId: resolvedRoomId).isGroup) ?? false
+            let info = try? await appContainer.matrixClientStore.roomInfo(roomId: resolvedRoomId)
+            isGroup = info?.isGroup ?? false
+            let peer = isGroup ? nil : info?.members.first
+            avatarUrl = info?.avatarUrl ?? peer?.avatarUrl
+            peerUserId = peer?.userId
             let newHandle = try await appContainer.matrixClientStore.openTimeline(roomId: resolvedRoomId)
             handle = newHandle
             messagesTask = Task { [weak self] in

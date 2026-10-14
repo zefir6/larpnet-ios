@@ -23,6 +23,9 @@ struct MatrixAvatarView: View {
     let avatarUrl: String?
     let name: String
     var size: CGFloat = 44
+    /// A local user's mxid: their Friendica profile photo is tried first (see
+    /// `MatrixClientStore.friendicaAvatarURL(userId:)` for why), then `avatarUrl`.
+    var userId: String? = nil
     let appContainer: AppContainer
 
     @State private var image: UIImage?
@@ -39,13 +42,18 @@ struct MatrixAvatarView: View {
                 InitialsAvatar(name: name, size: size)
             }
         }
-        .task(id: avatarUrl) {
+        .task(id: (userId ?? "") + "|" + (avatarUrl ?? "")) {
             image = nil
             await load()
         }
     }
 
     private func load() async {
+        if let friendicaURL = appContainer.matrixClientStore.friendicaAvatarURL(userId: userId),
+           let loaded = await appContainer.imageLoader.load(friendicaURL) {
+            image = loaded
+            return
+        }
         guard let avatarUrl else { return }
         if let cached = MatrixAvatarCache.shared.image(for: avatarUrl) {
             image = cached

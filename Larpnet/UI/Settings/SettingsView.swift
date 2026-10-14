@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @AppStorage("show_chat_timestamps") private var showChatTimestamps = true
+    @AppStorage(ChatNameDisplay.defaultsKey) private var chatNameDisplay = ChatNameDisplay.full.rawValue
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
 
@@ -112,6 +113,14 @@ struct SettingsView: View {
 
             Section("Chat") {
                 Toggle("Show timestamps in chat list", isOn: $showChatTimestamps)
+                Picker("Show people as", selection: $chatNameDisplay) {
+                    Text("Full name").tag(ChatNameDisplay.full.rawValue)
+                    Text("Handle").tag(ChatNameDisplay.handle.rawValue)
+                    Text("Full name (@handle)").tag(ChatNameDisplay.both.rawValue)
+                }
+                .onChange(of: chatNameDisplay) { _, value in
+                    appContainer.matrixClientStore.setChatNameDisplay(ChatNameDisplay(rawValue: value) ?? .full)
+                }
                 ChatEncryptionRows(appContainer: appContainer)
             }
 
