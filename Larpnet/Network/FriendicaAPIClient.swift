@@ -448,6 +448,49 @@ final class FriendicaAPIClient: Sendable {
         }
     }
 
+    // MARK: - Matrix chat
+
+    /// `POST /larpnet_matrix` -- the `larpnet_matrix` addon's native-app identity endpoint
+    /// (`larpnet_matrix_post()`). Any valid app token works, same trust level as reading the
+    /// user's own timeline. Returns a short-lived (60s) JWT the caller trades at the returned
+    /// homeserver's `/login` for a real Matrix session -- see `MatrixClientStore`.
+    func matrixLogin() async throws -> MatrixLoginResponse {
+        try await send(path: "larpnet_matrix", method: "POST")
+    }
+
+    /// `POST /larpnet_matrix/encryption` (`larpnet_matrix_encryption_endpoint()`) -- `action`
+    /// is `get`, `confirm`, `set_private` or `prepare_standard`. See `MatrixEncryptionInfo`.
+    func matrixEncryption(action: String) async throws -> MatrixEncryptionInfo {
+        try await send(path: "larpnet_matrix/encryption", method: "POST", query: [URLQueryItem(name: "action", value: action)])
+    }
+
+    /// `POST /larpnet_matrix/mute` (`larpnet_matrix_mute_endpoint()`) -- the shared per-room mute
+    /// the web and Android clients use too: a Matrix push rule written server-side, so a timed
+    /// mute also ends with no client running. `action` is `list`, `mute` (with `untilMillis`, or
+    /// none for permanent) or `unmute`.
+    func matrixMute(action: String, roomId: String? = nil, untilMillis: Int64? = nil) async throws -> MatrixMutesResponse {
+        var query = [URLQueryItem(name: "action", value: action)]
+        if let roomId { query.append(URLQueryItem(name: "room_id", value: roomId)) }
+        if let untilMillis { query.append(URLQueryItem(name: "until", value: String(untilMillis))) }
+        return try await send(path: "larpnet_matrix/mute", method: "POST", query: query)
+    }
+
+    // MARK: - Classic notification push (APNs)
+
+    /// `POST /larpnet_apns` -- the `larpnet_apns` addon's device-token registration endpoint,
+    /// the iOS counterpart of Android's FCM registration. Separate from Matrix chat's own
+    /// pusher registration (`MatrixClientStore.registerPusher`, which talks to Synapse
+    /// directly) -- this is for classic Friendica notifications (likes, comments, follows,
+    /// DMs), which have no encryption/content restriction, so the real title/body goes
+    /// straight to Apple server-side.
+    func registerApnsToken(_ token: String) async throws {
+        _ = try await perform(buildFormRequest(path: "larpnet_apns", fields: ["token": token]))
+    }
+
+    func unregisterApnsToken(_ token: String) async throws {
+        _ = try await perform(buildFormRequest(path: "larpnet_apns", fields: ["token": token, "unregister": "1"]))
+    }
+
     // MARK: - Media
 
     /// Uploads the avatar via Friendica's legacy Twitter-compatible

@@ -1,7 +1,9 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct LarpnetApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appContainer: AppContainer
     @State private var isLoggedIn: Bool
     @State private var hasAcceptedTerms: Bool
@@ -17,6 +19,17 @@ struct LarpnetApp: App {
         // notification *authorization* has to wait until `body` runs (it's async, `init()`
         // isn't), see the `.task` below.
         BackgroundRefresh.register(appContainer: container)
+        // `@UIApplicationDelegateAdaptor`'s wrapped value already exists by this point in
+        // `init()` (SwiftUI initializes property wrappers before the init body runs) -- so
+        // `AppDelegate`'s own `didRegisterForRemoteNotificationsWithDeviceToken` callback,
+        // which can fire at any point after `registerForRemoteNotifications()` is called, is
+        // guaranteed to see this set.
+        appDelegate.appContainer = container
+        // Chat badge: Chat tab + app icon, updated after every Matrix sync.
+        container.matrixClientStore.onUnreadCountChange = { [weak container] count in
+            container?.chatBadgeStore.totalUnreadCount = count
+            UNUserNotificationCenter.current().setBadgeCount(count)
+        }
     }
 
     var body: some Scene {
@@ -58,6 +71,9 @@ struct LarpnetApp: App {
                 if let account = try? await appContainer.friendicaAPI().verifyCredentials() {
                     appContainer.currentAccountStore.set(account.id)
                 }
+                // Start chat in the background at launch, not only when the Chat tab first
+                // opens, so the unread badge is right from the start.
+                try? await appContainer.matrixClientStore.ensureClient()
             }
         }
     }

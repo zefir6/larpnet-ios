@@ -1,5 +1,6 @@
 @preconcurrency import BackgroundTasks
 import Foundation
+import UIKit
 import UserNotifications
 
 /// Background polling of `GET /api/v1/notifications`, replacing Android's ntfy long-lived-
@@ -58,11 +59,18 @@ enum BackgroundRefresh {
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             if granted {
                 schedule()
+                // Real APNs registration, for Matrix chat push (AppDelegate.swift receives the
+                // resulting device token) -- independent of the BGAppRefreshTask scheduled
+                // above, which only ever covers classic Friendica notifications. Apple's own
+                // guidance is to call this on every launch a user has push enabled, not just
+                // once ever, since a token can be reissued at any time.
+                UIApplication.shared.registerForRemoteNotifications()
             } else {
                 tokenStore.pushEnabled = false
             }
         case .authorized, .provisional, .ephemeral:
             schedule()
+            UIApplication.shared.registerForRemoteNotifications()
         case .denied:
             // Previously granted then revoked in iOS Settings -- reflect that back into our
             // own toggle rather than silently scheduling a task whose notifications can never

@@ -17,6 +17,7 @@ struct ProfileView: View {
     let onEditProfile: () -> Void
     let onOpenHashtag: (String) -> Void
     let onOpenAlbums: () -> Void
+    let onOpenChat: (String) -> Void
 
     init(
         accountId: String?, appContainer: AppContainer,
@@ -25,7 +26,8 @@ struct ProfileView: View {
         onReply: @escaping (Status) -> Void,
         onEditProfile: @escaping () -> Void,
         onOpenHashtag: @escaping (String) -> Void = { _ in },
-        onOpenAlbums: @escaping () -> Void = {}
+        onOpenAlbums: @escaping () -> Void = {},
+        onOpenChat: @escaping (String) -> Void = { _ in }
     ) {
         _viewModel = State(initialValue: ProfileViewModel(accountId: accountId, appContainer: appContainer))
         self.appContainer = appContainer
@@ -35,6 +37,7 @@ struct ProfileView: View {
         self.onEditProfile = onEditProfile
         self.onOpenHashtag = onOpenHashtag
         self.onOpenAlbums = onOpenAlbums
+        self.onOpenChat = onOpenChat
     }
 
     var body: some View {
@@ -67,12 +70,19 @@ struct ProfileView: View {
                         }
                     } else if let relationship = viewModel.relationship {
                         let label = relationship.following ? "Unfollow" : (relationship.requested ? "Requested" : "Follow")
-                        if relationship.following || relationship.requested {
-                            Button(label) { viewModel.toggleFollow() }
+                        HStack {
+                            if relationship.following || relationship.requested {
+                                Button(label) { viewModel.toggleFollow() }
+                                    .buttonStyle(.bordered)
+                            } else {
+                                Button(label) { viewModel.toggleFollow() }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                            // No follow relationship required -- chat works for any local
+                            // account, mirroring the web client's profile "Chat" deep link
+                            // (`Profile::getMatrixChatLink()`), which has the same rule.
+                            Button("Chat") { onOpenChat(account.username) }
                                 .buttonStyle(.bordered)
-                        } else {
-                            Button(label) { viewModel.toggleFollow() }
-                                .buttonStyle(.borderedProminent)
                         }
                     }
                 }

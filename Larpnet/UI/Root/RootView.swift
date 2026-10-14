@@ -21,6 +21,8 @@ struct RootView: View {
     @State private var albumsPath: [AppRoute] = []
     @State private var mediaPath: [AppRoute] = []
     @State private var contactsPath: [AppRoute] = []
+    @State private var chatPath: [AppRoute] = []
+    @State private var morePath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
 
     var body: some View {
@@ -29,11 +31,36 @@ struct RootView: View {
                 tabContent(for: destination)
                     .tabItem { Label(destination.label, systemImage: destination.systemImage) }
                     .tag(destination)
+                    .badge(destination == .chat ? appContainer.chatBadgeStore.totalUnreadCount : 0)
             }
+            // Fixed last tab, bottom-right -- not itself reassignable to another zone, always
+            // the catch-all for whatever destinations aren't in the bottom bar or top bar.
+            tabStack(path: $morePath) { moreContent }
+                .tabItem { Label("More", systemImage: "ellipsis.circle") }
+                .tag("more")
         }
         .tint(LarpnetTheme.accent)
         .sheet(item: $composeContext) { context in
             ComposeView(context: context, appContainer: appContainer, onPosted: {})
+        }
+        // A tapped chat notification -- presented over whatever tab is showing, so it works
+        // wherever (or whether) Chat sits in the user's navigation layout.
+        .sheet(item: Binding(
+            get: { appContainer.chatBadgeStore.pendingRoomId.map(PendingChatRoom.init) },
+            set: { appContainer.chatBadgeStore.pendingRoomId = $0?.id }
+        )) { pending in
+            NavigationStack {
+                ChatThreadView(
+                    target: .room(id: pending.id, name: ""), appContainer: appContainer,
+                    onOpenInfo: { _ in }
+                )
+                .larpnetNavigationBarStyle()
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") { appContainer.chatBadgeStore.pendingRoomId = nil }
+                    }
+                }
+            }
         }
     }
 
@@ -52,6 +79,7 @@ struct RootView: View {
         case .albums: tabStack(path: $albumsPath) { destinationContent(for: .albums, path: $albumsPath) }
         case .media: tabStack(path: $mediaPath) { destinationContent(for: .media, path: $mediaPath) }
         case .contacts: tabStack(path: $contactsPath) { destinationContent(for: .contacts, path: $contactsPath) }
+        case .chat: tabStack(path: $chatPath) { destinationContent(for: .chat, path: $chatPath) }
         }
     }
 
@@ -120,6 +148,11 @@ struct RootView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
+                            Button { path.wrappedValue.append(.chat) } label: {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                            }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
                             Button { path.wrappedValue.append(.messages) } label: {
                                 Image(systemName: "envelope")
                             }
@@ -154,19 +187,91 @@ struct RootView: View {
                 )
                 .navigationTitle("Contacts")
                 .navigationBarTitleDisplayMode(.inline)
+            case .chat:
+                ChatView(
+                    appContainer: appContainer,
+                    onOpenRoom: { room in
+                        path.wrappedValue.append(.chatThread(.room(id: room.id, name: room.name)))
+                    },
+                    onNewChat: { path.wrappedValue.append(.newChat) }
+                )
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(appContainer.navigationLayoutStore.menu) { d in
-                        Button(d.label, systemImage: d.systemImage) {
-                            path.wrappedValue.append(.destination(d))
+            if !appContainer.navigationLayoutStore.topBar.isEmpty {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        ForEach(appContainer.navigationLayoutStore.topBar) { d in
+                            Button(d.label, systemImage: d.systemImage) {
+                                path.wrappedValue.append(.destination(d))
+                            }
                         }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
                     }
-                } label: {
-                    Image(systemName: "line.3.horizontal")
+                    // Explicit, not left to `.toolbarColorScheme(.dark)`'s automatic tinting --
+                    // confirmed live that a *lone* toolbar button (nothing else sharing its
+                    // placement) renders with a low-contrast glass fill under the global
+                    // `.tint(LarpnetTheme.accent)` (`RootView.body`'s `TabView`), while a
+                    // placement with 2+ grouped buttons renders crisp white. Since which
+                    // screens have a second trailing button varies per destination, pinning
+                    // white here keeps every screen legible instead of only the ones that
+                    // happen to have company.
+                    .tint(.white)
                 }
+            }
+            // Fixed, not customizable -- Notifications is frequent/time-sensitive enough to
+            // deserve a guaranteed spot on every screen rather than competing for bar space
+            // (see `AppDestination.customizableCases`). Suppressed on Notifications itself --
+            // no point pushing a second copy of the screen you're already on.
+            if destination != .notifications {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { path.wrappedValue.append(.destination(.notifications)) } label: {
+                        Image(systemName: "bell")
+                    }
+                    .tint(.white)
+                }
+            }
+        }
+    }
+
+    /// The bottom-right "More" tab's root -- everything not currently in the bottom bar or the
+    /// top-left bar, reached the same way the old top-left menu reached its items (pushing
+    /// `.destination(d)` onto this tab's own stack).
+    @ViewBuilder
+    private var moreContent: some View {
+        List(appContainer.navigationLayoutStore.more) { destination in
+            Button {
+                morePath.append(.destination(destination))
+            } label: {
+                Label(destination.label, systemImage: destination.systemImage)
+            }
+        }
+        .navigationTitle("More")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Same shared toolbar as every other tab root (`destinationContent`'s trailing
+            // `.toolbar` below) -- duplicated here rather than routed through that function
+            // since this tab's root is a plain list, not one of `AppDestination`'s cases.
+            if !appContainer.navigationLayoutStore.topBar.isEmpty {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        ForEach(appContainer.navigationLayoutStore.topBar) { d in
+                            Button(d.label, systemImage: d.systemImage) {
+                                morePath.append(.destination(d))
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                    }
+                    .tint(.white)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { morePath.append(.destination(.notifications)) } label: {
+                    Image(systemName: "bell")
+                }
+                .tint(.white)
             }
         }
     }
@@ -194,7 +299,8 @@ struct RootView: View {
                             onReply: { composeContext = ComposeContext(replyToId: $0.id) },
                             onEditProfile: { path.wrappedValue.append(.editProfile) },
                             onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) },
-                            onOpenAlbums: { path.wrappedValue.append(.destination(.albums)) }
+                            onOpenAlbums: { path.wrappedValue.append(.destination(.albums)) },
+                            onOpenChat: { path.wrappedValue.append(.chatThread(.nickname($0))) }
                         )
                     case .editProfile:
                         EditProfileView(appContainer: appContainer, onSaved: {})
@@ -223,6 +329,58 @@ struct RootView: View {
                         )
                     case .messageThread(let accountId, let conversationId):
                         ConversationThreadView(accountId: accountId, conversationId: conversationId, appContainer: appContainer)
+                    case .chat:
+                        ChatView(
+                            appContainer: appContainer,
+                            onOpenRoom: { room in
+                                path.wrappedValue.append(.chatThread(.room(id: room.id, name: room.name)))
+                            },
+                            onNewChat: { path.wrappedValue.append(.newChat) }
+                        )
+                    case .newChat:
+                        SearchView(
+                            appContainer: appContainer,
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            onSelectAccount: { account in
+                                path.wrappedValue.removeLast()
+                                // Matrix identities only exist for local users (see
+                                // `larpnet_matrix_localpart()`) -- `username`, not `acct`, is
+                                // the Friendica nickname. `chatRecipientMode` below already
+                                // filters results to local accounts only, so this is never a
+                                // not-actually-chattable remote pick.
+                                path.wrappedValue.append(.chatThread(.nickname(account.username)))
+                            },
+                            chatRecipientMode: true,
+                            onEnterMatrixAddress: { address in
+                                path.wrappedValue.removeLast()
+                                path.wrappedValue.append(.chatThread(.matrixId(address)))
+                            }
+                        )
+                    case .chatThread(let target):
+                        ChatThreadView(
+                            target: target, appContainer: appContainer,
+                            onOpenInfo: { path.wrappedValue.append(.chatRoomInfo(roomId: $0)) }
+                        )
+                    case .chatRoomInfo(let roomId):
+                        ChatRoomInfoView(
+                            roomId: roomId, appContainer: appContainer,
+                            onAddMember: { path.wrappedValue.append(.addChatMember(roomId: roomId)) },
+                            onLeft: { path.wrappedValue.removeLast(min(2, path.wrappedValue.count)) }
+                        )
+                    case .addChatMember(let roomId):
+                        SearchView(
+                            appContainer: appContainer,
+                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            onSelectAccount: { account in
+                                Task {
+                                    try? await appContainer.matrixClientStore.inviteMember(
+                                        roomId: roomId, nickname: account.username
+                                    )
+                                    await MainActor.run { path.wrappedValue.removeLast() }
+                                }
+                            },
+                            chatRecipientMode: true
+                        )
                     case .blockedAccounts:
                         BlockedAccountsView(appContainer: appContainer)
                     case .hiddenPosts:
@@ -271,4 +429,9 @@ struct RootView: View {
                 }
         }
     }
+}
+
+/// `Identifiable` wrapper for `ChatBadgeStore.pendingRoomId`, for `.sheet(item:)`.
+private struct PendingChatRoom: Identifiable {
+    let id: String
 }
