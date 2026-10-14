@@ -103,6 +103,17 @@ struct ChatThreadView: View {
         .navigationTitle(viewModel.roomName ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if viewModel.roomId != nil {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        MatrixAvatarView(
+                            avatarUrl: viewModel.avatarUrl, name: viewModel.roomName ?? "Chat", size: 28,
+                            userId: viewModel.peerUserId, appContainer: appContainer
+                        )
+                        Text(viewModel.roomName ?? "Chat").font(.headline).lineLimit(1)
+                    }
+                }
+            }
             if let roomId = viewModel.roomId {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Info") { onOpenInfo(roomId) }
@@ -136,7 +147,7 @@ struct ChatThreadView: View {
                 if viewModel.isGroup {
                     MatrixAvatarView(
                         avatarUrl: cluster.senderAvatarUrl, name: cluster.senderDisplayName ?? "?",
-                        size: 28, appContainer: appContainer
+                        size: 28, userId: cluster.senderId, appContainer: appContainer
                     )
                 } else {
                     Color.clear.frame(width: 28, height: 28)
