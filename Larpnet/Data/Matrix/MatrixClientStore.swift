@@ -202,9 +202,10 @@ final class MatrixClientStore {
             let muted = mutes.keys.contains(room.id())
             let unreadCount = muted ? 0 : await Self.unreadCount(of: room)
             let avatarUrl = await avatarUrl(for: room)
+            let peerUserId = room.avatarUrl() == nil ? await peerUserId(for: room) : nil
             result.append(ChatRoom(
                 id: room.id(), name: name, preview: previewText, timestamp: timestamp,
-                unreadCount: unreadCount, avatarUrl: avatarUrl,
+                unreadCount: unreadCount, avatarUrl: avatarUrl, peerUserId: peerUserId,
                 muted: muted, mutedUntil: mutes[room.id()].flatMap { $0 }
             ))
         }
@@ -314,12 +315,55 @@ final class MatrixClientStore {
         try? await client.setAccountData(eventType: "m.direct", content: json)
     }
 
-    /// Real room avatar, same hero-fallback shape as `displayName(for:)`: for a 1:1 DM, the
-    /// room itself rarely has its own avatar set, so fall back to the other person's.
+    /// Everyone in `room` but us (joined or invited, bots excluded). Not `room.heroes()`: under
+    /// the plain v2 sync this app uses, Synapse sends no room-summary heroes, so `heroes()` was
+    /// always empty (confirmed on larpnet-android, 2026-10-14) -- every 1:1 row fell through to
+    /// the SDK's computed name (the partner's bare localpart, e.g. "borsuk") with initials only.
+    /// Locally-known members first; the network `/members` fetch only for a room whose member
+    /// list was never loaded (the SDK caches it afterwards).
+    private func otherMemberIds(of room: Room) async -> [String] {
+        let own = room.ownUserId()
+        let local = ((try? await room.activeHumanMemberIdsNoSync()) ?? []).filter { $0 != own }
+        if !local.isEmpty { return local }
+        return ((try? await room.activeHumanMemberIds()) ?? []).filter { $0 != own }
+    }
+
+    /// The other member of a 1:1 room, nil for groups -- used for the Friendica-photo avatar on
+    /// room-list rows (see `friendicaAvatarURL(userId:)`).
+    private func peerUserId(for room: Room) async -> String? {
+        let others = await otherMemberIds(of: room)
+        return others.count == 1 ? others[0] : nil
+    }
+
+    /// Real room avatar: for a 1:1 DM the room itself rarely has its own avatar set, so fall
+    /// back to the other person's.
     private func avatarUrl(for room: Room) async -> String? {
         if let url = room.avatarUrl() { return url }
-        let heroes = await room.heroes()
-        return heroes.count == 1 ? heroes[0].avatarUrl : nil
+        guard let peer = await peerUserId(for: room) else { return nil }
+        return try? await room.memberAvatarUrl(userId: peer)
+    }
+
+    /// The Friendica profile photo (80px `/photo/avatar/<nickname>.jpg`) for a user on this
+    /// homeserver, nil for anyone else. Every local Matrix account is a Friendica account whose
+    /// localpart is the lowercased nickname (`larpnet_matrix_localpart()` server-side), and that
+    /// photo URL is public -- unlike the SDK's sender/member profiles, which under plain v2
+    /// sync's lazy-loaded members are often not loaded, so a Matrix `avatar_url` alone mostly
+    /// left chat showing initials only. Same source the web client's `avatarUrlForUserId()` uses.
+    func friendicaAvatarURL(userId: String?) -> URL? {
+        guard let userId, let localpart = Self.localpart(of: userId),
+              let serverName, Self.serverName(fromMxid: userId) == serverName,
+              var base = tokenStore.instanceBaseURL else { return nil }
+        if !base.hasPrefix("http") { base = "https://" + base }
+        if !base.hasSuffix("/") { base += "/" }
+        let encoded = localpart.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? localpart
+        return URL(string: base + "photo/avatar/" + encoded + ".jpg")
+    }
+
+    /// Settings' chat name style -- also nudges the room list to re-resolve its names now,
+    /// rather than only on the next sync.
+    func setChatNameDisplay(_ mode: ChatNameDisplay) {
+        UserDefaults.standard.set(mode.rawValue, forKey: ChatNameDisplay.defaultsKey)
+        roomListContinuation?.yield()
     }
 
     /// Fetches a real avatar image's bytes for a `mxc://` URL (a sender's or room's) -- callers
@@ -408,7 +452,10 @@ final class MatrixClientStore {
                 avatarUrl: $0.avatarUrl
             )
         }
-        return ChatRoomInfo(roomId: roomId, rawName: room.rawName() ?? "", isGroup: members.count != 1, members: members)
+        return ChatRoomInfo(
+            roomId: roomId, rawName: room.rawName() ?? "", isGroup: members.count != 1, members: members,
+            avatarUrl: room.avatarUrl()
+        )
     }
 
     func renameRoom(roomId: String, name: String) async throws {
@@ -948,13 +995,26 @@ final class MatrixClientStore {
     }
 
     /// Room-list display name -- same algorithm as the web client's `roomDisplayName()`: for a
-    /// 1:1 DM, prefer the Friendica name we already know (covers a partner who's never opened
-    /// chat themselves, so has no Matrix displayname yet) over the SDK's own hero-based
-    /// summary; fall back to the SDK's computed name (handles group rooms) otherwise.
+    /// 1:1 DM, the partner's name via `resolvedName` (Friendica name first, so it also covers
+    /// someone who's never opened chat themselves); for a group, its own name if it has one,
+    /// else its members' resolved names -- not the SDK's computed name, which is built from the
+    /// (here always empty, see `otherMemberIds(of:)`) heroes and so ends up as bare localparts.
     private func displayName(for room: Room) async -> String {
-        let heroes = await room.heroes()
-        if heroes.count == 1 {
-            return resolvedName(userId: heroes[0].userId, fallbackDisplayName: heroes[0].displayName)
+        let others = await otherMemberIds(of: room)
+        if others.count == 1 {
+            let peer = others[0]
+            return resolvedName(userId: peer, fallbackDisplayName: try? await room.memberDisplayName(userId: peer))
+        }
+        if let raw = room.rawName(), !raw.isEmpty { return raw }
+        if !others.isEmpty {
+            // "Both" would read as a wall of "(@...)" in a joined list -- full names only there.
+            let mode: ChatNameDisplay = ChatNameDisplay.current == .both ? .full : ChatNameDisplay.current
+            var names: [String] = []
+            for userId in others.prefix(3) {
+                names.append(resolvedName(userId: userId, fallbackDisplayName: try? await room.memberDisplayName(userId: userId), mode: mode))
+            }
+            let joined = names.joined(separator: ", ")
+            return others.count > 3 ? joined + " +\(others.count - 3)" : joined
         }
         if let name = room.displayName(), !name.isEmpty { return name }
         return "Chat"
@@ -964,12 +1024,24 @@ final class MatrixClientStore {
     /// Friendica name we already know (covers a member who's never opened chat themselves, so
     /// has no Matrix displayname yet) over the SDK-reported displayname, then fall back to the
     /// bare localpart.
-    private func resolvedName(userId: String, fallbackDisplayName: String?) -> String {
-        if let localpart = Self.localpart(of: userId), let resolved = contactsByLocalpart[localpart] {
-            return resolved
+    private func resolvedName(userId: String, fallbackDisplayName: String?, mode: ChatNameDisplay = .current) -> String {
+        guard let localpart = Self.localpart(of: userId) else {
+            if let name = fallbackDisplayName, !name.isEmpty { return name }
+            return userId
         }
-        if let name = fallbackDisplayName, !name.isEmpty { return name }
-        return Self.localpart(of: userId) ?? userId
+        let fullName: String
+        if let resolved = contactsByLocalpart[localpart] {
+            fullName = resolved
+        } else if let name = fallbackDisplayName, !name.isEmpty {
+            fullName = name
+        } else {
+            return localpart
+        }
+        switch mode {
+        case .full: return fullName
+        case .handle: return localpart
+        case .both: return fullName.caseInsensitiveCompare(localpart) == .orderedSame ? fullName : "\(fullName) (@\(localpart))"
+        }
     }
 
     private func preview(for room: Room) async -> (text: String?, timestamp: Date?) {

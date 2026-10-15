@@ -112,7 +112,7 @@ private struct ChatRoomRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            MatrixAvatarView(avatarUrl: room.avatarUrl, name: room.name, appContainer: appContainer)
+            MatrixAvatarView(avatarUrl: room.avatarUrl, name: room.name, userId: room.peerUserId, appContainer: appContainer)
             VStack(alignment: .leading, spacing: 2) {
                 Text(room.name).font(.body.weight(hasUnread ? .semibold : .medium)).lineLimit(1)
                 if let preview = room.preview {

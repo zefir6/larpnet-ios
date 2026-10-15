@@ -46,7 +46,10 @@ struct ChatRoomInfoView: View {
             Section("Participants") {
                 ForEach(viewModel.members) { member in
                     HStack(spacing: 10) {
-                        MatrixAvatarView(avatarUrl: member.avatarUrl, name: member.displayName, size: 36, appContainer: appContainer)
+                        MatrixAvatarView(
+                            avatarUrl: member.avatarUrl, name: member.displayName, size: 36,
+                            userId: member.userId, appContainer: appContainer
+                        )
                         Text(member.displayName)
                         Spacer()
                         Button("Remove", role: .destructive) {
