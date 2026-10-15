@@ -7,9 +7,12 @@ and `LarpnetNotificationServiceExtension`; they must match) -- follow **one** ve
 ever goes up, shared by internal TestFlight builds and App Store releases:
 
 - Every push/merge to `test` (Xcode Cloud's internal-testing track): bump the minor component of
-  `MARKETING_VERSION` (e.g. 1.34 -> 1.35) and `CURRENT_PROJECT_VERSION` (the build number) by 1, so
-  every internal build carries its own distinct version. Run `xcodegen generate` afterward to
-  regenerate the gitignored `Larpnet.xcodeproj` with the new values.
+  `MARKETING_VERSION` (e.g. 1.34 -> 1.35), so every internal build carries its own distinct
+  version. Also bump `CURRENT_PROJECT_VERSION` by 1 to keep local builds distinct, but note that
+  **Xcode Cloud assigns the build number itself** (its own running counter -- e.g. builds 42/43
+  for version 1.34), so the build number App Store Connect/TestFlight shows never comes from
+  `project.yml`; only the version does. Run `xcodegen generate` afterward to regenerate the
+  gitignored `Larpnet.xcodeproj` with the new values.
 - An App Store release off `main` ships **whatever version `test` is already at** -- never
   renumber for a release, and never compute "next minor past what's live on the App Store".
 
