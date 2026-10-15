@@ -2,19 +2,26 @@
 
 ## Versioning
 
-`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml` (lines ~80-81) must stay in sync
-with the App Store release. On the `test` branch (Xcode Cloud's internal-testing track), bump
-*both* on every push, not just once a version ships: increment `MARKETING_VERSION`'s minor
-component (e.g. 1.1 -> 1.2) and `CURRENT_PROJECT_VERSION` (the build number) by 1 for each change
-merged/pushed to `test`, so every internal build carries its own distinct version. Run
-`xcodegen generate` afterward to regenerate the gitignored `Larpnet.xcodeproj` with the new
-values.
+`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in `project.yml` -- set in **both** targets (the app
+and `LarpnetNotificationServiceExtension`; they must match) -- follow **one** version line that only
+ever goes up, shared by internal TestFlight builds and App Store releases:
 
-When preparing an actual App Store submission off `main` (not an internal test build), use the
-release cadence instead: after a version has shipped, bump `MARKETING_VERSION` to the next minor
-version past what's live on the App Store (e.g. App Store is on 1.0 -> next branch is 1.1) and
-increment `CURRENT_PROJECT_VERSION` by 1 -- same mechanics as above, just tied to actual shipped
-releases rather than every internal push.
+- Every push/merge to `test` (Xcode Cloud's internal-testing track): bump the minor component of
+  `MARKETING_VERSION` (e.g. 1.34 -> 1.35) and `CURRENT_PROJECT_VERSION` (the build number) by 1, so
+  every internal build carries its own distinct version. Run `xcodegen generate` afterward to
+  regenerate the gitignored `Larpnet.xcodeproj` with the new values.
+- An App Store release off `main` ships **whatever version `test` is already at** -- never
+  renumber for a release, and never compute "next minor past what's live on the App Store".
+
+Never decrease either number, and never reuse a version number that was already uploaded. This
+rule exists because of 2026-10-14: a release was renumbered to "next past the live App Store
+version" (1.5 -> 1.6 (8)) while `test` was already at 1.33 (35), and that number then got synced
+back to `test`, so the line went backwards and reused old numbers. It was fixed by jumping both
+branches to 1.34 (36).
+
+**Server-side chat version gate:** friendica-larpnet's `larpnet_matrix_outdated_app_min_version()`
+rejects chat login from iOS builds in the range [1.8, 1.31) -- old builds from before standard
+encryption mode. Never number a build inside 1.8-1.30 again, or chat will refuse to log it in.
 
 ## Test account credentials
 
