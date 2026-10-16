@@ -28,8 +28,14 @@ struct ChatView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 }
-                // Long-press: the shared per-room mute (same as Chat info and the web client).
+                // Long-press: mark-as-read (when there's anything to clear) plus the shared
+                // per-room mute (same as Chat info and the web client).
                 .contextMenu {
+                    if room.unreadCount > 0 {
+                        Button("Mark as read", systemImage: "envelope.open") {
+                            Task { await viewModel.markAsRead(room) }
+                        }
+                    }
                     ChatMuteMenuItems(
                         muted: room.muted,
                         onMute: { duration in Task { await viewModel.mute(room, for: duration) } },

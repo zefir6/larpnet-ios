@@ -51,6 +51,7 @@ final class ChatThreadViewModel {
     /// arrives while the app is in the background stays unread.
     private var isVisible = false
     private var lastReadMessageId: String?
+    private var isMarkingRead = false
 
     init(target: ChatThreadTarget, appContainer: AppContainer) {
         self.target = target
@@ -131,13 +132,29 @@ final class ChatThreadViewModel {
         }
     }
 
-    /// Read receipt for the newest message, once per new message while on screen.
+    /// Read receipt for the newest message, once per new message while on screen. Deliberately
+    /// does *not* set `lastReadMessageId` until `sendReadReceipt` actually succeeds: marking it
+    /// read locally before the server confirms would permanently poison the `newest !=
+    /// lastReadMessageId` guard above on a transient failure (network hiccup, sync loop
+    /// mid-restart) -- the room's unread bubble would then never clear until a newer message
+    /// bumped `newest` to a different id, exactly the "opening the conversation doesn't clear
+    /// the badge" symptom reported 2026-10-17. Same class of bug as this app's other
+    /// local-cache-vs-server-truth mismatches -- see `resetRecovery()`'s doc comment.
     private func markReadIfVisible() {
-        guard isVisible, let handle,
+        guard isVisible, !isMarkingRead, let handle,
               let newest = messages.last(where: { $0.eventId != nil })?.eventId,
               newest != lastReadMessageId else { return }
-        lastReadMessageId = newest
-        Task { try? await handle.sendReadReceipt(eventId: newest) }
+        isMarkingRead = true
+        Task {
+            defer { isMarkingRead = false }
+            do {
+                try await handle.sendReadReceipt(eventId: newest)
+                lastReadMessageId = newest
+            } catch {
+                // Left unset on purpose -- see doc comment above. The next message update (or
+                // re-opening the thread) retries.
+            }
+        }
     }
 
     /// The NSE groups a room's pushes under `threadIdentifier = roomId`; opening the room
