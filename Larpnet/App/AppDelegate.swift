@@ -68,6 +68,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    /// Background wake from a silent/`content-available` remote notification -- lets a Matrix
+    /// push catch the sync loop up while suspended, rather than only decrypting one event for
+    /// the banner (`NotificationServiceExtension`) and leaving the room list/open chat screen to
+    /// notice the backlog whenever the long-poll loop happens to resume on its own. No-op if the
+    /// server-sent payload doesn't set `content-available: 1` (iOS never invokes this at all in
+    /// that case) or if chat hasn't logged in yet this launch.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard let appContainer else {
+            completionHandler(.noData)
+            return
+        }
+        Task {
+            await appContainer.matrixClientStore.resyncAndWait()
+            completionHandler(.newData)
+        }
+    }
+
     func application(
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error

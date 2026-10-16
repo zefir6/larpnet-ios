@@ -4,6 +4,7 @@ import UserNotifications
 @main
 struct LarpnetApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @State private var appContainer: AppContainer
     @State private var isLoggedIn: Bool
     @State private var hasAcceptedTerms: Bool
@@ -74,6 +75,15 @@ struct LarpnetApp: App {
                 // Start chat in the background at launch, not only when the Chat tab first
                 // opens, so the unread badge is right from the start.
                 try? await appContainer.matrixClientStore.ensureClient()
+            }
+            // Catches up the sync loop on every return to the foreground -- including a tap on
+            // a chat notification, which also transitions scene phase to `.active` -- rather
+            // than leaving an already-open chat screen or the room list showing whatever the
+            // long-poll loop had before iOS suspended this process. Cheap and idempotent (just
+            // restarts the existing `syncV2` subscription) if chat is already caught up.
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                appContainer.matrixClientStore.resyncNow()
             }
         }
     }
