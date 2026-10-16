@@ -33,9 +33,22 @@ struct SearchView: View {
         self.onEnterMatrixAddress = onEnterMatrixAddress
     }
 
+    private var queryIsBlank: Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    private var query: String { viewModel.query }
+
+    /// While typing, instant local matches from the already-loaded suggested list come first
+    /// (deduped against the debounced server results, which land ~300ms later) so frequently-
+    /// chatted-with contacts surface first and the list never looks frozen while waiting on the
+    /// network. With a blank query this isn't used -- the dedicated "Suggested" section below
+    /// covers that case instead.
     private var displayedResults: [Account] {
         guard chatRecipientMode else { return viewModel.results }
-        return viewModel.results.filter { !$0.acct.contains("@") }
+        let suggestedMatches = viewModel.filteredSuggestedAccounts
+        let localResults = viewModel.results.filter { !$0.acct.contains("@") }
+        let suggestedIds = Set(suggestedMatches.map(\.id))
+        return suggestedMatches + localResults.filter { !suggestedIds.contains($0.id) }
     }
 
     var body: some View {
@@ -53,17 +66,16 @@ struct SearchView: View {
                     .disabled(customAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            ForEach(displayedResults) { account in
-                Button {
-                    if let onSelectAccount {
-                        onSelectAccount(account)
-                    } else {
-                        onOpenProfile(account.id)
+            if chatRecipientMode, queryIsBlank, !viewModel.suggestedAccounts.isEmpty {
+                Section("Suggested") {
+                    ForEach(viewModel.suggestedAccounts) { account in
+                        accountRow(account)
                     }
-                } label: {
-                    AccountRow(account: account)
                 }
-                .buttonStyle(.plain)
+            } else {
+                ForEach(displayedResults) { account in
+                    accountRow(account)
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -71,10 +83,26 @@ struct SearchView: View {
         .background(LarpnetTheme.pageBackground)
         .searchable(text: $viewModel.query, prompt: chatRecipientMode ? "Search Larpnet users" : "Search accounts")
         .overlay {
-            if viewModel.isSearching, displayedResults.isEmpty {
+            if viewModel.isSearching, displayedResults.isEmpty, !queryIsBlank {
                 ProgressView()
             }
         }
         .navigationTitle("Search")
+        .task {
+            if chatRecipientMode { viewModel.loadSuggestedContactsIfNeeded() }
+        }
+    }
+
+    private func accountRow(_ account: Account) -> some View {
+        Button {
+            if let onSelectAccount {
+                onSelectAccount(account)
+            } else {
+                onOpenProfile(account.id)
+            }
+        } label: {
+            AccountRow(account: account)
+        }
+        .buttonStyle(.plain)
     }
 }
