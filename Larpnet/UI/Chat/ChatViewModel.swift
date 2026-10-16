@@ -75,6 +75,32 @@ final class ChatViewModel {
         await updateMute { try await $0.unmuteRoom(roomId: room.id) }
     }
 
+    /// "Mark as read" from the row's context menu, without opening the thread -- sends the same
+    /// explicit-event-id read receipt `ChatThreadViewModel.markReadIfVisible()` does (not
+    /// `Room.markAsRead()`, which silently no-ops on this app's plain-v2-sync setup, see that
+    /// method's doc comment), just driven headlessly: open the room's timeline only long enough
+    /// to read its first snapshot's newest event id, send the receipt, then close it again.
+    func markAsRead(_ room: ChatRoom) async {
+        do {
+            let handle = try await appContainer.matrixClientStore.openTimeline(roomId: room.id)
+            defer { handle.close() }
+            for await snapshot in handle.messages {
+                if let newest = snapshot.last(where: { $0.eventId != nil })?.eventId {
+                    try await handle.sendReadReceipt(eventId: newest)
+                }
+                break
+            }
+            // Optimistic, same as mute/unmute above -- the next sync tick confirms it via
+            // Synapse's own notification count.
+            if let index = rooms.firstIndex(where: { $0.id == room.id }) {
+                rooms[index].unreadCount = 0
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     private func updateMute(_ call: (MatrixClientStore) async throws -> [String: Date?]) async {
         do {
             let mutes = try await call(appContainer.matrixClientStore)
