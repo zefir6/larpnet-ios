@@ -90,6 +90,7 @@ targets:
           - pl.larpnet.ios.refresh
         UIBackgroundModes:
           - fetch
+          - remote-notification
         UIAppFonts:
           - OpenSans-Regular.ttf
           - OpenSans-Semibold.ttf
