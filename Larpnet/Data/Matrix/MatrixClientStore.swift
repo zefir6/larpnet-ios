@@ -963,6 +963,34 @@ final class MatrixClientStore {
         onUnreadCountChange?(count)
     }
 
+    /// Forces a fresh `/sync` round rather than waiting for the continuous `syncV2` loop's
+    /// current long-poll to resolve on its own -- that loop pauses whenever iOS suspends this
+    /// process, and nothing previously nudged it awake again, so a chat screen or room list
+    /// opened right after a notification/foreground could sit on stale state until the loop
+    /// happened to notice the backlog. Call on app resume (foreground, notification tap) and
+    /// from a background remote-notification wake. Cancelling and re-subscribing `syncV2` is
+    /// the same primitive `ensureClient()`/`startSyncLoop` already use, just re-triggered on
+    /// demand -- the SDK's local since-token makes this a catch-up, not a full resync. No-op
+    /// before the first `ensureClient()` login.
+    func resyncNow() {
+        guard let client else { return }
+        startSyncLoop(client)
+    }
+
+    /// Async variant of `resyncNow()` for a background remote-notification wake: restarts the
+    /// sync loop and gives it a short grace period to land a fresh round before returning, so
+    /// `AppDelegate`'s `didReceiveRemoteNotification` can call iOS's fetch-completion handler
+    /// promptly rather than either returning immediately (no catch-up actually happened yet) or
+    /// holding the whole background budget open. Deliberately a fixed grace period, not a
+    /// signal tied to the loop's own tick callback (`roomListContinuation`): that already has a
+    /// single dedicated subscriber (the room list screen), and piggybacking a second waiter onto
+    /// it risks dropping whichever one is currently listening.
+    func resyncAndWait(graceSeconds: UInt64 = 5) async {
+        guard client != nil else { return }
+        resyncNow()
+        try? await Task.sleep(nanoseconds: graceSeconds * 1_000_000_000)
+    }
+
     // MARK: - Private
 
     private func startSyncLoop(_ client: Client) {
