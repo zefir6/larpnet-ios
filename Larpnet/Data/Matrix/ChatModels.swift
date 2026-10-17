@@ -11,8 +11,10 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     let timestamp: Date?
     /// Synapse's notification count (`MatrixClientStore.unreadCount(of:)`) -- drives
     /// the room row's unread styling and the Chat tab's badge. Always 0 for a `muted` room, same
-    /// as Synapse's own notification count (and so every other client's badge).
-    let unreadCount: Int
+    /// as Synapse's own notification count (and so every other client's badge). `var`, not
+    /// `let`, so `ChatViewModel.markAsRead()` can zero it optimistically the same way
+    /// `muted`/`mutedUntil` already do for mute -- the next sync confirms it shortly after.
+    var unreadCount: Int
     /// `mxc://` room avatar, from `Room.avatarUrl()` (falling back to the 1:1 hero's own avatar
     /// when the room itself has none) -- resolved to a real image via
     /// `MatrixClientStore.avatarThumbnail(mxcUrl:)`, not just an initials placeholder.
