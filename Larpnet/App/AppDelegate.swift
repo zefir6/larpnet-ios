@@ -64,7 +64,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // this device stays on `BackgroundRefresh`'s polling fallback for classic
         // notifications until the next successful registration attempt.
         Task {
-            try? await appContainer.friendicaAPI().registerApnsToken(hexToken)
+            if (try? await appContainer.friendicaAPI().registerApnsToken(hexToken)) != nil {
+                appContainer.tokenStore.classicApnsRegisteredToken = hexToken
+            }
         }
     }
 

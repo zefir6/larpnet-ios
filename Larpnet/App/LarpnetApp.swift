@@ -75,6 +75,9 @@ struct LarpnetApp: App {
                 // Start chat in the background at launch, not only when the Chat tab first
                 // opens, so the unread badge is right from the start.
                 try? await appContainer.matrixClientStore.ensureClient()
+                #if DEBUG
+                await DebugChatPush.runIfRequested(appContainer: appContainer)
+                #endif
             }
             // Catches up the sync loop on every return to the foreground -- including a tap on
             // a chat notification, which also transitions scene phase to `.active` -- rather

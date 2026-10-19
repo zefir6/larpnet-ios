@@ -1,5 +1,4 @@
 import Foundation
-import UserNotifications
 
 /// Either an already-known room (opened from the room list, which already has its display
 /// name), a bare Friendica nickname (opened from a profile's "Chat" button or the new-chat
@@ -126,7 +125,7 @@ final class ChatThreadViewModel {
             badgeStore.visibleRoomId = roomId
             lastReadMessageId = nil
             markReadIfVisible()
-            Task { await Self.removeDeliveredNotifications(roomId: roomId) }
+            Task { await ChatNotifications.remove(roomId: roomId) }
         } else if !visible, badgeStore.visibleRoomId == roomId {
             badgeStore.visibleRoomId = nil
         }
@@ -155,16 +154,6 @@ final class ChatThreadViewModel {
                 // re-opening the thread) retries.
             }
         }
-    }
-
-    /// The NSE groups a room's pushes under `threadIdentifier = roomId`; opening the room
-    /// clears them from Notification Center.
-    private static func removeDeliveredNotifications(roomId: String) async {
-        let center = UNUserNotificationCenter.current()
-        let ids = await center.deliveredNotifications()
-            .filter { $0.request.content.threadIdentifier == roomId }
-            .map(\.request.identifier)
-        center.removeDeliveredNotifications(withIdentifiers: ids)
     }
 
     func close() {

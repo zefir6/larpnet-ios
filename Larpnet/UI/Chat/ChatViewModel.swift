@@ -90,6 +90,7 @@ final class ChatViewModel {
                 }
                 break
             }
+            await ChatNotifications.remove(roomId: room.id)
             // Optimistic, same as mute/unmute above -- the next sync tick confirms it via
             // Synapse's own notification count.
             if let index = rooms.firstIndex(where: { $0.id == room.id }) {

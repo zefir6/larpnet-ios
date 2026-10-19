@@ -42,6 +42,7 @@ final class SettingsViewModel {
             }
         } else {
             BackgroundRefresh.cancel()
+            appContainer.tokenStore.classicApnsRegisteredToken = nil
             // Best-effort: only relevant if a device token was ever actually received (real
             // push infra configured, permission granted at some point). Logging out entirely
             // would clean this up automatically via `MatrixClientStore.clearSession()`'s own
