@@ -213,6 +213,36 @@ final class MatrixClientStore {
         return result.sorted { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }
     }
 
+    /// Up to `limit` local Larpnet nicknames to suggest as "start a new chat" recipients,
+    /// ranked by last-activity recency across existing 1:1 DM rooms -- the only interaction
+    /// signal actually available (no per-room message-count tracking exists). Federated peers
+    /// are excluded, same as `SearchView.chatRecipientMode`'s own filter: a remote account has
+    /// no Friendica nickname for `SearchViewModel` to resolve via `searchAccounts`. Doesn't go
+    /// through `rooms()`/`ChatRoom.peerUserId` since that field is only populated when the raw
+    /// SDK room has no avatar set -- irrelevant here, this only needs the peer mxid and a
+    /// recency ordering.
+    func suggestedDirectChatNicknames(limit: Int = 8) async -> [String] {
+        guard let client = try? await ensureClient() else { return [] }
+        var scored: [(nickname: String, timestamp: Date?)] = []
+        for room in client.rooms() where room.membership() == .joined {
+            let others = await otherMemberIds(of: room)
+            guard others.count == 1,
+                  Self.serverName(fromMxid: others[0]) == serverName,
+                  let localpart = Self.localpart(of: others[0])
+            else { continue }
+            let (_, timestamp) = await preview(for: room)
+            scored.append((nickname: localpart, timestamp: timestamp))
+        }
+        var seen = Set<String>()
+        var result: [String] = []
+        for entry in scored.sorted(by: { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }) {
+            guard seen.insert(entry.nickname).inserted else { continue }
+            result.append(entry.nickname)
+            if result.count == limit { break }
+        }
+        return result
+    }
+
     /// Cleans up the leftover duplicate DM rooms from before `openOrCreateDirectRoom()`
     /// reliably used `getDmRoom()`/`m.direct` -- same story as the web client's
     /// `findOrCreateDirectRoom()` (see its doc comment in `matrix.js`): a client that fails to
