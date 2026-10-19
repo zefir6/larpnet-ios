@@ -110,13 +110,14 @@ final class MatrixClientStore {
             Self.discardEventCache(in: sessionDir)
             tokenStore.matrixEventCacheResetVersion = Self.matrixEventCacheResetVersion
         }
-        let newClient = try await ClientBuilder()
-            .homeserverUrl(url: identity.homeserver)
-            .sessionPaths(dataPath: sessionDir.path, cachePath: sessionDir.path)
-            .build()
+        let newClient = try await MatrixClientConfig.builder(homeserver: identity.homeserver, sessionDir: sessionDir).build()
         try await newClient.customLoginWithJwt(
             jwt: identity.token, initialDeviceName: "larpnet iOS", deviceId: deviceId()
         )
+        // For NotificationServiceExtension, so a push doesn't need a login of its own.
+        if let session = try? newClient.session() {
+            MatrixSavedSession(session).save(to: tokenStore)
+        }
 
         // One blocking sync before this call returns -- `rooms()`/`getDmRoom()`/`getRoom()`
         // all read local state that only exists once at least one sync has landed. Confirmed
@@ -786,10 +787,7 @@ final class MatrixClientStore {
     private func discardLocalSession(_ identity: MatrixLoginResponse) async {
         if let oldDeviceId = tokenStore.matrixDeviceId,
            let dir = try? MatrixSessionPaths.sessionDirectory(for: identity.userId),
-           let old = try? await ClientBuilder()
-               .homeserverUrl(url: identity.homeserver)
-               .sessionPaths(dataPath: dir.path, cachePath: dir.path)
-               .build() {
+           let old = try? await MatrixClientConfig.builder(homeserver: identity.homeserver, sessionDir: dir).build() {
             if (try? await old.customLoginWithJwt(
                 jwt: identity.token, initialDeviceName: "larpnet iOS", deviceId: oldDeviceId
             )) != nil {
@@ -934,7 +932,9 @@ final class MatrixClientStore {
     /// push rule itself arrives over sync shortly after.
     func muteRoom(roomId: String, until: Date?) async throws -> [String: Date?] {
         let millis = until.map { Int64($0.timeIntervalSince1970 * 1000) }
-        return Self.dates(try await friendicaAPI().matrixMute(action: "mute", roomId: roomId, untilMillis: millis).mutes)
+        let mutes = Self.dates(try await friendicaAPI().matrixMute(action: "mute", roomId: roomId, untilMillis: millis).mutes)
+        await ChatNotifications.remove(roomId: roomId)
+        return mutes
     }
 
     func unmuteRoom(roomId: String) async throws -> [String: Date?] {
@@ -948,19 +948,56 @@ final class MatrixClientStore {
     private static let muteAccountDataType = "pl.larpnet.mute_until"
 
     /// Recomputes the unread-room count for `onUnreadCountChange`; skipped while one is already
-    /// running (that one reads the latest state anyway).
-    private func recountUnread(_ client: Client) async {
+    /// running (that one reads the latest state anyway). `fromSyncResponse`: also removes the
+    /// delivered notifications of rooms that are now read (`ChatNotifications.reconcile`) --
+    /// only right after a sync response, since before one (a sync loop just restarted after
+    /// iOS suspended the app) the local state can predate pushes already shown.
+    private func recountUnread(_ client: Client, fromSyncResponse: Bool = false) async {
         guard !isRecountingUnread else { return }
         isRecountingUnread = true
         defer { isRecountingUnread = false }
         let mutes = await muteStates(client)
         var count = 0
-        for room in client.rooms() where room.membership() == .joined && !mutes.keys.contains(room.id()) {
-            if await Self.unreadCount(of: room) > 0 {
+        var readRoomIds: Set<String> = []
+        for room in client.rooms() where room.membership() == .joined {
+            if !mutes.keys.contains(room.id()), await Self.unreadCount(of: room) > 0 {
                 count += 1
+            } else {
+                readRoomIds.insert(room.id())
             }
         }
         onUnreadCountChange?(count)
+        if fromSyncResponse {
+            await ChatNotifications.reconcile(readRoomIds: readRoomIds)
+        }
+    }
+
+    /// Forces a fresh `/sync` round rather than waiting for the continuous `syncV2` loop's
+    /// current long-poll to resolve on its own -- that loop pauses whenever iOS suspends this
+    /// process, and nothing previously nudged it awake again, so a chat screen or room list
+    /// opened right after a notification/foreground could sit on stale state until the loop
+    /// happened to notice the backlog. Call on app resume (foreground, notification tap) and
+    /// from a background remote-notification wake. Cancelling and re-subscribing `syncV2` is
+    /// the same primitive `ensureClient()`/`startSyncLoop` already use, just re-triggered on
+    /// demand -- the SDK's local since-token makes this a catch-up, not a full resync. No-op
+    /// before the first `ensureClient()` login.
+    func resyncNow() {
+        guard let client else { return }
+        startSyncLoop(client)
+    }
+
+    /// Async variant of `resyncNow()` for a background remote-notification wake: restarts the
+    /// sync loop and gives it a short grace period to land a fresh round before returning, so
+    /// `AppDelegate`'s `didReceiveRemoteNotification` can call iOS's fetch-completion handler
+    /// promptly rather than either returning immediately (no catch-up actually happened yet) or
+    /// holding the whole background budget open. Deliberately a fixed grace period, not a
+    /// signal tied to the loop's own tick callback (`roomListContinuation`): that already has a
+    /// single dedicated subscriber (the room list screen), and piggybacking a second waiter onto
+    /// it risks dropping whichever one is currently listening.
+    func resyncAndWait(graceSeconds: UInt64 = 5) async {
+        guard client != nil else { return }
+        resyncNow()
+        try? await Task.sleep(nanoseconds: graceSeconds * 1_000_000_000)
     }
 
     // MARK: - Private
@@ -970,7 +1007,7 @@ final class MatrixClientStore {
         let bridge = SyncTickBridge { [weak self] in
             Task { @MainActor in
                 self?.roomListContinuation?.yield()
-                await self?.recountUnread(client)
+                await self?.recountUnread(client, fromSyncResponse: true)
             }
         }
         syncHandle = client.syncV2(settings: SyncSettingsV2(fullState: false), listener: bridge)

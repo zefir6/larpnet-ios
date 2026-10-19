@@ -98,6 +98,7 @@ final class TokenStore: @unchecked Sendable {
         static let accessToken = "access_token"
         static let preferredInstance = "preferred_instance"
         static let matrixDeviceId = "matrix_device_id"
+        static let matrixSession = "matrix_session"
     }
 
     init() {
@@ -136,6 +137,23 @@ final class TokenStore: @unchecked Sendable {
     var matrixDeviceId: String? {
         get { keychain.get(Key.matrixDeviceId) }
         set { keychain.set(newValue, for: Key.matrixDeviceId) }
+    }
+
+    /// The main app's current Matrix session (`MatrixSavedSession`, JSON) -- saved after every
+    /// chat login so `NotificationServiceExtension` can restore it instead of doing its own JWT
+    /// login on every push (a login round trip per message, and the login endpoint is rate
+    /// limited). Cleared together with `matrixDeviceId`: it belongs to that device.
+    var matrixSessionJSON: String? {
+        get { keychain.get(Key.matrixSession) }
+        set { keychain.set(newValue, for: Key.matrixSession) }
+    }
+
+    /// The APNs token `larpnet_apns` last accepted for classic notifications (likes, comments,
+    /// follows). While it matches `apnsDeviceTokenHex`, the server pushes those itself, so
+    /// `BackgroundRefresh` must not post them a second time. Cleared when push is turned off.
+    var classicApnsRegisteredToken: String? {
+        get { defaults.string(forKey: "classic_apns_registered_token") }
+        set { defaults.set(newValue, forKey: "classic_apns_registered_token") }
     }
 
     /// The last APNs device token this app was handed (`AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken`),
@@ -262,5 +280,6 @@ final class TokenStore: @unchecked Sendable {
     /// this type's job, but deliberately not folded into `clear()` itself (see its doc comment).
     func clearMatrixDeviceId() {
         matrixDeviceId = nil
+        matrixSessionJSON = nil
     }
 }
