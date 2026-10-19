@@ -24,6 +24,13 @@ enum ChatNotifications {
         await remove { readRoomIds.contains($0.request.content.threadIdentifier) && $0.date < cutoff }
     }
 
+    /// A `chat_counts` push saying nothing is unread anywhere: every chat notification goes
+    /// (older than `reconcileGrace`, as a newer message's push may have overtaken it).
+    static func removeAllChat() async {
+        let cutoff = Date().addingTimeInterval(-reconcileGrace)
+        await remove { ($0.request.content.userInfo["room_id"] as? String)?.isEmpty == false && $0.date < cutoff }
+    }
+
     private static func remove(where matches: (UNNotification) -> Bool) async {
         let center = UNUserNotificationCenter.current()
         let ids = await center.deliveredNotifications().filter(matches).map(\.request.identifier)
