@@ -1,3 +1,4 @@
+import os
 import UIKit
 import UserNotifications
 
@@ -86,6 +87,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             return
         }
         Task {
+            // `chat_counts` (a read receipt changed the counts, e.g. a chat read on another
+            // device): with nothing unread, no sync is needed to know every chat notification
+            // can go. Otherwise the catch-up sync's reconcile removes the read rooms' ones.
+            if userInfo["type"] as? String == "chat_counts" {
+                let unread = userInfo["unread"] as? String ?? "?"
+                Logger(subsystem: "pl.larpnet.ios", category: "ChatCounts").info("chat_counts unread=\(unread, privacy: .public)")
+                if unread == "0" {
+                    await ChatNotifications.removeAllChat()
+                }
+            }
             await appContainer.matrixClientStore.resyncAndWait()
             completionHandler(.newData)
         }
