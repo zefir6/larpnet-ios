@@ -44,6 +44,10 @@ final class MatrixClientStore {
 
     private var client: Client?
     private var syncHandle: TaskHandle?
+    /// The `ensureEncryption()` run in flight, shared by concurrent callers: it now runs at
+    /// launch (`LarpnetApp`) as well as when the Chat tab opens, and two interleaved runs could
+    /// both see pending + `.disabled` and set up recovery twice.
+    private var encryptionTask: Task<RecoveryPromptKind?, Error>?
     private var roomListContinuation: AsyncStream<Void>.Continuation?
     /// nickname (lowercased) -> Friendica display name, from the same `contacts` list the web
     /// client's `resolveDisplayName()` uses -- covers anyone who's never opened chat themselves
@@ -529,6 +533,16 @@ final class MatrixClientStore {
     /// - Standard, active: restore silently if `.incomplete` -- on failure fall back to the
     ///   manual prompt, **never** reset, so a transient error can't wipe history.
     func ensureEncryption() async throws -> RecoveryPromptKind? {
+        if let running = encryptionTask {
+            return try await running.value
+        }
+        let task = Task { try await ensureEncryptionUnshared() }
+        encryptionTask = task
+        defer { encryptionTask = nil }
+        return try await task.value
+    }
+
+    private func ensureEncryptionUnshared() async throws -> RecoveryPromptKind? {
         try await ensureClient()
         guard let enc = encryptionInfo, enc.isStandard, let passphrase = enc.passphrase else {
             return try await recoveryPromptKind()
