@@ -103,6 +103,8 @@ struct ChatImageViewer: View {
                 ZoomableImageView {
                     Image(uiImage: shown).resizable().aspectRatio(contentMode: .fit)
                 }
+                // Centred: the ZStack is top-trailing for the close button.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             Button {
                 dismiss()
