@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 struct ChatThreadView: View {
@@ -10,6 +11,7 @@ struct ChatThreadView: View {
     /// reset/clear rebuilds the whole list, and counting those as new made the banner climb
     /// ("25 nowych", growing) with nothing unread (seen on Android, same logic here).
     @State private var newestSeen: Date?
+    @State private var pickedPhoto: PhotosPickerItem?
     @Environment(\.scenePhase) private var scenePhase
     private let appContainer: AppContainer
     let onOpenInfo: (String) -> Void
@@ -93,12 +95,26 @@ struct ChatThreadView: View {
             // something", which isn't true here.
             if !viewModel.failedToLoad {
                 HStack {
+                    PhotosPicker(selection: $pickedPhoto, matching: .images) {
+                        Image(systemName: "photo")
+                            .font(.title3)
+                    }
+                    .disabled(viewModel.isSending || viewModel.roomId == nil)
+                    .accessibilityLabel("Send photo")
                     TextField("Message", text: $viewModel.draft)
                         .textFieldStyle(.roundedBorder)
                     Button("Send") { Task { await viewModel.send() } }
                         .disabled(viewModel.isSending || viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding()
+                .overlay(alignment: .top) {
+                    if viewModel.isSending { ProgressView().controlSize(.small) }
+                }
+                .onChange(of: pickedPhoto) { _, item in
+                    guard let item else { return }
+                    pickedPhoto = nil
+                    Task { await viewModel.sendImage(item) }
+                }
             }
         }
         .overlay {
@@ -198,10 +214,15 @@ struct ChatThreadView: View {
                 undecryptableNote
             } else {
                 let bubbleColor: Color = isOwn ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.15)
-                Text(message.body)
-                    .padding(8)
-                    .background(bubbleColor, in: RoundedRectangle(cornerRadius: 16))
-                    .frame(maxWidth: 280, alignment: isOwn ? .trailing : .leading)
+                if let image = message.image {
+                    ChatImageView(image: image, appContainer: appContainer)
+                }
+                if message.image == nil || !message.body.isEmpty {
+                    Text(message.body)
+                        .padding(8)
+                        .background(bubbleColor, in: RoundedRectangle(cornerRadius: 16))
+                        .frame(maxWidth: 280, alignment: isOwn ? .trailing : .leading)
+                }
             }
             if isLastInCluster {
                 Text(message.timestamp, style: .time)

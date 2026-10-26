@@ -380,6 +380,20 @@ final class MatrixClientStore {
         return try await client.getMediaThumbnail(mediaSource: source, width: UInt64(size), height: UInt64(size))
     }
 
+    /// Full bytes of a chat image (see `ChatImage`). Always the original, not a server
+    /// thumbnail: an encrypted image has no server-side thumbnail, and the apps send none of
+    /// their own (same as the web client), so callers downscale locally.
+    func chatImage(_ image: ChatImage) async throws -> Data {
+        let client = try await ensureClient()
+        let source = try MediaSource.fromJson(json: image.sourceJson)
+        return try await client.getMediaContent(mediaSource: source)
+    }
+
+    /// The homeserver's upload limit (`m.upload.size`), as the web composer checks it.
+    func maxUploadSize() async throws -> Int {
+        Int(try await ensureClient().getMaxMediaUploadSize())
+    }
+
     /// Finds the existing 1:1 room with this nickname, or creates one -- same "1:1 == exactly
     /// this other member" heuristic and encrypted-by-default behavior as the web client's
     /// `findOrCreateDirectRoom()`. `nickname` is a plain Friendica nickname (e.g. from
@@ -1111,7 +1125,7 @@ final class MatrixClientStore {
     private static func previewText(for content: TimelineItemContent) -> String? {
         guard case .msgLike(let msgLike) = content else { return nil }
         switch msgLike.kind {
-        case .message(let message): return message.body
+        case .message(let message): return MatrixNotificationPreview.mediaLabel(for: message.msgType) ?? message.body
         case .unableToDecrypt: return "🔒"
         default: return nil
         }
@@ -1182,6 +1196,21 @@ final class ChatTimelineHandle {
         _ = try await timeline.send(msg: messageEventContentFromMarkdown(md: text))
     }
 
+    /// Sends an already-encoded JPEG as `m.image`. The SDK uploads it (encrypted, in an
+    /// encrypted room) and builds the same content shape the web client sends and renders.
+    func sendImage(jpeg: Data, width: Int, height: Int) async throws {
+        let info = ImageInfo(
+            height: UInt64(height), width: UInt64(width), mimetype: "image/jpeg", size: UInt64(jpeg.count),
+            thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: false
+        )
+        let filename = "IMG_\(Int(Date().timeIntervalSince1970)).jpg"
+        let params = UploadParameters(
+            source: .data(bytes: jpeg, filename: filename),
+            caption: nil, formattedCaption: nil, mentions: nil, inReplyTo: nil
+        )
+        try await timeline.sendImage(params: params, thumbnailSource: nil, imageInfo: info).join()
+    }
+
     /// Stops the timeline listener -- call when the thread screen closes, so the room's
     /// timeline diff subscription doesn't keep running (and retaining `self`) after the view
     /// that cares about it is gone.
@@ -1211,10 +1240,24 @@ final class ChatTimelineHandle {
 
     private func chatMessage(from item: TimelineItem) -> ChatMessage? {
         guard let event = item.asEvent(), case .msgLike(let msgLike) = event.content else { return nil }
-        let body: String
+        var body: String
         let isUndecryptable: Bool
+        var image: ChatImage?
         switch msgLike.kind {
-        case .message(let message): body = message.body; isUndecryptable = false
+        case .message(let message):
+            body = message.body
+            isUndecryptable = false
+            switch message.msgType {
+            case .image(let content):
+                image = ChatImage(
+                    sourceJson: content.source.toJson(),
+                    width: content.info?.width.map(Int.init), height: content.info?.height.map(Int.init)
+                )
+                body = content.caption ?? ""
+            case .file(let content): body = "📎 \(content.filename)"
+            case .video(let content): body = "🎬 \(content.filename)"
+            default: break
+            }
         case .unableToDecrypt: body = ""; isUndecryptable = true
         case .redacted: return nil
         default: return nil
@@ -1232,7 +1275,8 @@ final class ChatTimelineHandle {
             senderId: event.isOwn ? nil : event.sender,
             senderDisplayName: event.isOwn ? nil : resolveDisplayName(event.sender, sdkDisplayName),
             senderAvatarUrl: event.isOwn ? nil : avatarUrl,
-            isUndecryptable: isUndecryptable
+            isUndecryptable: isUndecryptable,
+            image: image
         )
     }
 }
