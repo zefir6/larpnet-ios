@@ -1,5 +1,6 @@
 import Foundation
 import MatrixRustSDK
+import os
 
 enum MatrixError: Error {
     case malformedIdentity
@@ -48,6 +49,10 @@ final class MatrixClientStore {
     /// launch (`LarpnetApp`) as well as when the Chat tab opens, and two interleaved runs could
     /// both see pending + `.disabled` and set up recovery twice.
     private var encryptionTask: Task<RecoveryPromptKind?, Error>?
+    /// The `ensureClient()` login in flight, shared by concurrent callers for the same reason:
+    /// launch, the Chat tab and `registerPusher` (APNs token callback) all call it at once, and
+    /// two interleaved logins would each build a client and start a sync loop.
+    private var clientTask: Task<Client, Error>?
     private var roomListContinuation: AsyncStream<Void>.Continuation?
     /// nickname (lowercased) -> Friendica display name, from the same `contacts` list the web
     /// client's `resolveDisplayName()` uses -- covers anyone who's never opened chat themselves
@@ -92,7 +97,16 @@ final class MatrixClientStore {
     @discardableResult
     func ensureClient() async throws -> Client {
         if let client { return client }
+        if let running = clientTask {
+            return try await running.value
+        }
+        let task = Task { try await ensureClientUnshared() }
+        clientTask = task
+        defer { clientTask = nil }
+        return try await task.value
+    }
 
+    private func ensureClientUnshared() async throws -> Client {
         let identity = try await friendicaAPI().matrixLogin()
         contactsByLocalpart = Dictionary(
             uniqueKeysWithValues: identity.contacts.map { ($0.nickname.lowercased(), $0.name) }
@@ -136,6 +150,13 @@ final class MatrixClientStore {
 
         client = newClient
         startSyncLoop(newClient)
+        // The APNs token usually arrives before this login finishes, so `AppDelegate`'s own
+        // `registerPusher` call can't be relied on alone -- register again from the cached
+        // token now that there's a gateway URL. Not awaited: it calls `ensureClient()`, which
+        // returns `client` right away from here on.
+        if tokenStore.pushEnabled, let pushkey = tokenStore.apnsDeviceTokenHex {
+            Task { await registerPusher(pushkey: pushkey) }
+        }
         return newClient
     }
 
@@ -865,20 +886,44 @@ final class MatrixClientStore {
     /// than accumulating duplicates across re-logins/token refreshes -- the pushkey (APNs
     /// device token) is the actual identity here, not the device id, so there's nothing worth
     /// keeping from a previous registration.
+    ///
+    /// `ensureClient()` before reading `pushGatewayUrl`, not after: the URL is only known once
+    /// that login has returned, and the APNs token callback almost always fires before it does
+    /// -- checking first meant the pusher was silently never registered (same order as
+    /// larpnet-android's `MatrixRepository.registerPusher`).
     func registerPusher(deviceToken: Data) async {
-        guard let gatewayUrl = pushGatewayUrl else { return }
-        guard let client = try? await ensureClient() else { return }
-        let pushkey = Self.hexEncode(deviceToken)
-        try? await client.setPusher(
-            identifiers: PusherIdentifiers(pushkey: pushkey, appId: "pl.larpnet.ios"),
-            kind: .http(data: HttpPusherData(url: gatewayUrl, format: .eventIdOnly, defaultPayload: "{}")),
-            appDisplayName: "Larpnet iOS",
-            deviceDisplayName: "Larpnet iOS",
-            profileTag: nil,
-            lang: "pl",
-            append: false
-        )
+        await registerPusher(pushkey: Self.hexEncode(deviceToken))
     }
+
+    func registerPusher(pushkey: String) async {
+        let client: Client
+        do {
+            client = try await ensureClient()
+        } catch {
+            Self.pushLog.error("registerPusher: no client: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard let gatewayUrl = pushGatewayUrl else {
+            Self.pushLog.info("registerPusher: server has no push gateway configured")
+            return
+        }
+        do {
+            try await client.setPusher(
+                identifiers: PusherIdentifiers(pushkey: pushkey, appId: "pl.larpnet.ios"),
+                kind: .http(data: HttpPusherData(url: gatewayUrl, format: .eventIdOnly, defaultPayload: "{}")),
+                appDisplayName: "Larpnet iOS",
+                deviceDisplayName: "Larpnet iOS",
+                profileTag: nil,
+                lang: "pl",
+                append: false
+            )
+            Self.pushLog.info("registerPusher: pusher set")
+        } catch {
+            Self.pushLog.error("registerPusher: setPusher failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static let pushLog = Logger(subsystem: "pl.larpnet.ios", category: "ChatPusher")
 
     /// Called when the user turns off push notifications (Settings) without logging out
     /// entirely -- `clearSession()`'s own `logout()` call already removes every pusher for
