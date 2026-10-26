@@ -51,6 +51,17 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     /// `ChatThreadView` renders this as a distinct inline note instead of a normal bubble;
     /// `body` is empty and unused in this case.
     let isUndecryptable: Bool
+    /// Set for an `m.image` message; `body` is then its caption (usually empty).
+    var image: ChatImage? = nil
+}
+
+/// An image message's media, display-ready -- loaded via `MatrixClientStore.chatImage(_:)`.
+struct ChatImage: Sendable, Hashable {
+    /// `MediaSource.toJson()`: the SDK object isn't Hashable, and for an encrypted room it's
+    /// what carries the decryption key -- so it's kept whole, never reduced to its `mxc://` URL.
+    let sourceJson: String
+    let width: Int?
+    let height: Int?
 }
 
 /// One other member of a room, display-ready -- `MatrixClientStore.roomInfo()`'s member list.

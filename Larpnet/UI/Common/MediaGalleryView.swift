@@ -26,8 +26,10 @@ struct MediaGalleryView: View {
 
             TabView(selection: $currentIndex) {
                 ForEach(Array(context.attachments.enumerated()), id: \.offset) { index, media in
-                    ZoomableImageView(url: URL(string: media.url))
-                        .tag(index)
+                    ZoomableImageView {
+                        RemoteImage(url: URL(string: media.url), contentMode: .fit)
+                    }
+                    .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: context.attachments.count > 1 ? .always : .never))
@@ -47,17 +49,18 @@ struct MediaGalleryView: View {
 }
 
 /// Pinch-to-zoom + double-tap-to-toggle-zoom, matching the standard iOS photo-viewer gesture
-/// set. Uses `RemoteImage(contentMode: .fit)` rather than the `.fill` every other call site
-/// uses, since this is a "show the whole image" context, not a thumbnail crop.
-private struct ZoomableImageView: View {
-    let url: URL?
+/// set. Callers pass a `.fit` image rather than the `.fill` every other call site uses, since
+/// this is a "show the whole image" context, not a thumbnail crop. Also used by chat images
+/// (`ChatImageViewer`), whose bytes come from the Matrix SDK rather than a URL.
+struct ZoomableImageView<Content: View>: View {
+    @ViewBuilder let content: Content
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
     var body: some View {
-        RemoteImage(url: url, contentMode: .fit)
+        content
             .scaleEffect(scale)
             .offset(offset)
             .gesture(

@@ -1,4 +1,7 @@
 import Foundation
+import PhotosUI
+import SwiftUI
+import UIKit
 
 /// Either an already-known room (opened from the room list, which already has its display
 /// name), a bare Friendica nickname (opened from a profile's "Chat" button or the new-chat
@@ -114,6 +117,53 @@ final class ChatThreadViewModel {
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    /// Sends a photo from the picker as `m.image`: re-encoded as JPEG and downscaled to at most
+    /// `maxImageSide` px (a full-resolution camera photo is 5-10 MB of mostly wasted upload),
+    /// then checked against the server's upload limit the way the web composer does.
+    func sendImage(_ item: PhotosPickerItem) async {
+        guard let handle else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let picked = UIImage(data: data) else {
+                errorMessage = "Couldn't read that photo"
+                return
+            }
+            let image = Self.downscaled(picked, maxSide: Self.maxImageSide)
+            guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
+                errorMessage = "Couldn't read that photo"
+                return
+            }
+            if let limit = try? await appContainer.matrixClientStore.maxUploadSize(), jpeg.count > limit {
+                errorMessage = "Photo is too large (server limit: \(limit / 1_000_000) MB)"
+                return
+            }
+            try await handle.sendImage(
+                jpeg: jpeg, width: Int(image.size.width * image.scale), height: Int(image.size.height * image.scale)
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private static let maxImageSide: CGFloat = 2048
+
+    /// Also bakes in the orientation: `UIGraphicsImageRenderer` draws the image upright, so the
+    /// JPEG needs no EXIF orientation (which not every Matrix client honours).
+    private static func downscaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+        let pixelWidth = image.size.width * image.scale
+        let pixelHeight = image.size.height * image.scale
+        let factor = min(1, maxSide / max(pixelWidth, pixelHeight))
+        let target = CGSize(width: (pixelWidth * factor).rounded(), height: (pixelHeight * factor).rounded())
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
         }
     }
 
