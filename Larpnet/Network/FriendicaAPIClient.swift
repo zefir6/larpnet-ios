@@ -634,6 +634,9 @@ final class FriendicaAPIClient: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw NetworkError.network(underlying: "no HTTP response")
         }
+        if http.statusCode == 403, String(data: data, encoding: .utf8)?.contains("insufficient_scope") == true {
+            throw NetworkError.insufficientScope
+        }
         if http.statusCode == 401 || http.statusCode == 403 {
             forceLogoutContinuation.yield(())
             throw NetworkError.auth
