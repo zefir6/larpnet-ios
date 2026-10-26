@@ -106,6 +106,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
+        Logger(subsystem: "pl.larpnet.ios", category: "ChatPusher")
+            .error("APNs registration failed: \(error.localizedDescription, privacy: .public)")
         // Nothing actionable -- the classic Friendica notification path (`BackgroundRefresh`)
         // doesn't depend on this at all, and a retry on the next launch is as good as anything
         // we could do here (typically transient: no network, or push not yet provisioned for
