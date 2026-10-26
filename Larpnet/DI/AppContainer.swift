@@ -55,6 +55,10 @@ final class AppContainer: @unchecked Sendable {
         AuthAPI(baseURL: baseURL, session: apiSession)
     })
 
+    lazy var classicPushStore = ClassicPushStore(
+        tokenStore: tokenStore, friendicaAPI: { try self.friendicaAPI() }, oAuthFlow: oAuthFlow
+    )
+
     // Memoized by base URL, same as Android's `cachedApi` -- rebuilds only if the user logs
     // into a different instance.
     private var cachedClient: (String, FriendicaAPIClient)?

@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var chatPath: [AppRoute] = []
     @State private var morePath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
+    @State private var showClassicPushPrompt = false
 
     var body: some View {
         TabView {
@@ -40,6 +41,20 @@ struct RootView: View {
                 .tag("more")
         }
         .tint(LarpnetTheme.accent)
+        // Once per login: an older login lacks the `push` scope (see `ClassicPushStore`).
+        // Settings keeps offering the same button afterwards.
+        .onChange(of: appContainer.classicPushStore.needsSignIn, initial: true) { _, needsSignIn in
+            guard needsSignIn, appContainer.tokenStore.pushEnabled,
+                  !appContainer.tokenStore.classicPushPromptShown else { return }
+            appContainer.tokenStore.classicPushPromptShown = true
+            showClassicPushPrompt = true
+        }
+        .alert("Turn on notifications", isPresented: $showClassicPushPrompt) {
+            Button("Sign in") { Task { try? await appContainer.classicPushStore.signIn() } }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("To get notifications about likes, comments and follows, sign in once more to give the app permission. You can also do this later in Settings.")
+        }
         .sheet(item: $composeContext) { context in
             ComposeView(context: context, appContainer: appContainer, onPosted: {})
         }

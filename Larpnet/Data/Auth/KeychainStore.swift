@@ -156,6 +156,18 @@ final class TokenStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "classic_apns_registered_token") }
     }
 
+    /// The current login's token lacks the `push` scope -- see `ClassicPushStore`.
+    var classicPushNeedsSignIn: Bool {
+        get { defaults.bool(forKey: "classic_push_needs_sign_in") }
+        set { defaults.set(newValue, forKey: "classic_push_needs_sign_in") }
+    }
+
+    /// `RootView`'s one-time "turn on notifications" prompt was already shown.
+    var classicPushPromptShown: Bool {
+        get { defaults.bool(forKey: "classic_push_prompt_shown") }
+        set { defaults.set(newValue, forKey: "classic_push_prompt_shown") }
+    }
+
     /// The last APNs device token this app was handed (`AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken`),
     /// hex-encoded -- cached only so `SettingsViewModel.togglePush(false)` can unregister the
     /// Matrix pusher without logging out entirely (there is no API to re-fetch the current
@@ -274,6 +286,9 @@ final class TokenStore: @unchecked Sendable {
         accessToken = nil
         currentAccountId = nil
         hasAcceptedTerms = false
+        // A new login asks for `push` itself.
+        classicPushNeedsSignIn = false
+        classicPushPromptShown = false
     }
 
     /// Only `MatrixClientStore.clearSession()` calls this -- kept here since Keychain access is

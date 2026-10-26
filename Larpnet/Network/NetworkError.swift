@@ -9,6 +9,9 @@ enum NetworkError: Error, Sendable {
     case network(underlying: String)
     case http(status: Int, body: String?)
     case auth
+    /// 403 `insufficient_scope`: the login token lacks an OAuth scope the endpoint needs
+    /// (see `ClassicPushStore`). Not a dead session, so no forced logout.
+    case insufficientScope
     case parse(underlying: String)
     case notLoggedIn
     case invalidURL

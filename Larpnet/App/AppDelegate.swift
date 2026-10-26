@@ -61,13 +61,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Classic Friendica notifications (likes/comments/follows/DMs) -- a separate
         // registration from the Matrix pusher above, same one APNs device token but a
         // different server-side addon (`larpnet_apns`, not `larpnet_matrix`/Synapse).
-        // Best-effort: a failure here (e.g. logged out, transient network error) just means
-        // this device stays on `BackgroundRefresh`'s polling fallback for classic
-        // notifications until the next successful registration attempt.
+        // Best-effort -- see `ClassicPushStore.register`, which also flags a login that's
+        // missing the `push` scope.
         Task {
-            if (try? await appContainer.friendicaAPI().registerApnsToken(hexToken)) != nil {
-                appContainer.tokenStore.classicApnsRegisteredToken = hexToken
-            }
+            await appContainer.classicPushStore.register(hexToken: hexToken)
         }
     }
 
