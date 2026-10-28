@@ -29,7 +29,12 @@ struct ChatThreadView: View {
         VStack(spacing: 0) {
             ScrollViewReader { scrollProxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    // Not lazy: a lazy stack only estimates the height of rows it hasn't built,
+                    // so "the bottom" moved as they got measured, and both opening a long
+                    // conversation and following new messages landed mid-history (2026-10-28).
+                    // The timeline holds at most a few hundred messages; the trade-off is that
+                    // every image thumbnail in it starts loading on open (they're cached).
+                    VStack(alignment: .leading, spacing: 12) {
                         ForEach(ChatMessageGrouping.build(from: viewModel.messages)) { day in
                             daySeparator(day.date)
                             ForEach(day.clusters) { cluster in
@@ -38,7 +43,7 @@ struct ChatThreadView: View {
                         }
                         // Bottom = this anchor is inside the viewport (with a little slack for
                         // the list's padding). Measured by geometry rather than onAppear/
-                        // onDisappear: LazyVStack keeps the anchor "appeared" after it scrolls
+                        // onDisappear: a lazy stack kept the anchor "appeared" after it scrolled
                         // off screen, so isAtBottom stuck at true -- the "N new" banner never
                         // showed and every incoming message yanked a reader of older history
                         // back to the bottom (seen on the simulator, 2026-10-25).
@@ -55,6 +60,9 @@ struct ChatThreadView: View {
                     .padding()
                 }
                 .coordinateSpace(.named(Self.scrollSpace))
+                // Opens at the newest message and keeps the bottom in place while the content
+                // above it changes size (back-pagination, images loading, the keyboard).
+                .defaultScrollAnchor(.bottom)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
                 .overlay(alignment: .bottom) {
                     if pendingNewMessages > 0 {
@@ -77,7 +85,9 @@ struct ChatThreadView: View {
                     newestSeen = max(previous ?? newest, newest)
                     let arrived = previous.map { seen in messages.filter { $0.timestamp > seen } } ?? []
                     let grew = messages.count > oldMessages.count
-                    if previous == nil || (grew && isAtBottom) || arrived.contains(where: \.isOwn) {
+                    if previous == nil {
+                        scrollProxy.scrollTo(Self.bottomAnchorId, anchor: .bottom)
+                    } else if (grew && isAtBottom) || arrived.contains(where: \.isOwn) {
                         withAnimation { scrollProxy.scrollTo(Self.bottomAnchorId, anchor: .bottom) }
                     } else if !isAtBottom {
                         pendingNewMessages += arrived.filter { !$0.isOwn }.count
