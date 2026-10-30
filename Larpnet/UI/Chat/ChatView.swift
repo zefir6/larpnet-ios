@@ -69,6 +69,7 @@ struct ChatView: View {
         }
         .refreshable { await viewModel.refresh() }
         .navigationTitle("Chat")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 // Deliberately not "square.and.pencil" -- that's the exact icon Home/Local use
@@ -76,6 +77,7 @@ struct ChatView: View {
                 // with "new chat" when switching tabs. "plus.bubble" reads unambiguously as
                 // starting a new conversation instead.
                 Button(action: onNewChat) { Image(systemName: "plus.bubble") }
+                    .tint(.white)
             }
         }
         .task { await viewModel.loadInitial() }
