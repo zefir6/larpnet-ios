@@ -353,19 +353,14 @@ struct RootView: View {
                             onNewChat: { path.wrappedValue.append(.newChat) }
                         )
                     case .newChat:
-                        SearchView(
+                        NewChatView(
                             appContainer: appContainer,
-                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
                             onSelectAccount: { account in
                                 path.wrappedValue.removeLast()
-                                // Matrix identities only exist for local users (see
-                                // `larpnet_matrix_localpart()`) -- `username`, not `acct`, is
-                                // the Friendica nickname. `chatRecipientMode` below already
-                                // filters results to local accounts only, so this is never a
-                                // not-actually-chattable remote pick.
+                                // `username`, not `acct`, is the Friendica nickname; the picker
+                                // only offers local accounts, which all have a Matrix identity.
                                 path.wrappedValue.append(.chatThread(.nickname(account.username)))
                             },
-                            chatRecipientMode: true,
                             onEnterMatrixAddress: { address in
                                 path.wrappedValue.removeLast()
                                 path.wrappedValue.append(.chatThread(.matrixId(address)))
@@ -383,9 +378,9 @@ struct RootView: View {
                             onLeft: { path.wrappedValue.removeLast(min(2, path.wrappedValue.count)) }
                         )
                     case .addChatMember(let roomId):
-                        SearchView(
+                        NewChatView(
                             appContainer: appContainer,
-                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            title: "Add person",
                             onSelectAccount: { account in
                                 Task {
                                     try? await appContainer.matrixClientStore.inviteMember(
@@ -393,8 +388,7 @@ struct RootView: View {
                                     )
                                     await MainActor.run { path.wrappedValue.removeLast() }
                                 }
-                            },
-                            chatRecipientMode: true
+                            }
                         )
                     case .blockedAccounts:
                         BlockedAccountsView(appContainer: appContainer)

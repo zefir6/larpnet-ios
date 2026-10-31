@@ -35,6 +35,14 @@ final class FriendicaAPIClient: Sendable {
         try await send(path: "api/v1/accounts/\(id)")
     }
 
+    /// Exact match for a local nickname -- unlike `searchAccounts`, which also returns
+    /// federated accounts that happen to share the name. Qualified with this instance's host
+    /// so the lookup never resolves to a remote account.
+    func lookupLocalAccount(nickname: String) async throws -> Account {
+        let acct = baseURL.host.map { "\(nickname)@\($0)" } ?? nickname
+        return try await send(path: "api/v1/accounts/lookup", query: [URLQueryItem(name: "acct", value: acct)])
+    }
+
     func getAccountStatuses(id: String, maxId: String? = nil) async throws -> Page<Status> {
         var query: [URLQueryItem] = []
         if let maxId { query.append(URLQueryItem(name: "max_id", value: maxId)) }
