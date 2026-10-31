@@ -217,6 +217,32 @@ final class MatrixClientStore {
         }
     }
 
+    /// Local Larpnet nicknames of 1:1 chat partners, newest conversation first -- the "Recent"
+    /// section of the new-chat picker (same idea as the web client's `recentPeerNicknames`).
+    /// Doesn't go through `rooms()`/`ChatRoom.peerUserId`, which is only set for rooms without
+    /// an avatar. Federated peers are skipped: they have no Friendica account to pick.
+    func recentDirectChatNicknames(limit: Int = 8) async -> [String] {
+        guard let client = try? await ensureClient(), let ownServer = serverName else { return [] }
+        var scored: [(nickname: String, timestamp: Date?)] = []
+        for room in client.rooms() where room.membership() == .joined {
+            let others = await otherMemberIds(of: room)
+            guard others.count == 1,
+                  Self.serverName(fromMxid: others[0]) == ownServer,
+                  let localpart = Self.localpart(of: others[0])
+            else { continue }
+            let (_, timestamp) = await preview(for: room)
+            scored.append((localpart, timestamp))
+        }
+        var seen = Set<String>()
+        var result: [String] = []
+        for entry in scored.sorted(by: { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }) {
+            guard seen.insert(entry.nickname).inserted else { continue }
+            result.append(entry.nickname)
+            if result.count == limit { break }
+        }
+        return result
+    }
+
     func rooms() async throws -> [ChatRoom] {
         let client = try await ensureClient()
         await acceptLocalInvites(client)

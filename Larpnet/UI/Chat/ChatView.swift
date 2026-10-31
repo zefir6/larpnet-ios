@@ -78,6 +78,7 @@ struct ChatView: View {
                 // starting a new conversation instead.
                 Button(action: onNewChat) { Image(systemName: "plus.bubble") }
                     .tint(.white)
+                    .accessibilityLabel("New chat")
             }
         }
         .task { await viewModel.loadInitial() }
@@ -150,5 +151,8 @@ private struct ChatRoomRow: View {
                 }
             }
         }
+        // The row is a `.plain` button label, which only hit-tests drawn content: without
+        // this, tapping the gap between the name and the timestamp did nothing.
+        .contentShape(Rectangle())
     }
 }
