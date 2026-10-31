@@ -30,18 +30,23 @@ enum MatrixNotificationPreview {
         return (title, messageBody)
     }
 
+    /// Label for a media message (also the room list's preview), nil for text-like ones.
+    static func mediaLabel(for messageType: MessageType) -> String? {
+        switch messageType {
+        case .image: return "📷 Photo"
+        case .file: return "📎 File"
+        case .audio: return "🎤 Voice message"
+        case .video: return "🎬 Video"
+        default: return nil
+        }
+    }
+
     private static func bodyFor(content: TimelineEventContent?) -> String? {
         guard let content, case .messageLike(let messageLike) = content else { return nil }
         switch messageLike {
         case .roomMessage(let messageType, _):
-            switch messageType {
-            case .text(let content): return content.body
-            case .image: return "📷 Photo"
-            case .file: return "📎 File"
-            case .audio: return "🎤 Voice message"
-            case .video: return "🎬 Video"
-            default: return "New message"
-            }
+            if case .text(let content) = messageType { return content.body }
+            return mediaLabel(for: messageType) ?? "New message"
         case .roomEncrypted:
             return "🔒"
         default:

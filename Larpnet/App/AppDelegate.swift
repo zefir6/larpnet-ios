@@ -1,3 +1,4 @@
+import os
 import UIKit
 import UserNotifications
 
@@ -60,11 +61,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Classic Friendica notifications (likes/comments/follows/DMs) -- a separate
         // registration from the Matrix pusher above, same one APNs device token but a
         // different server-side addon (`larpnet_apns`, not `larpnet_matrix`/Synapse).
-        // Best-effort: a failure here (e.g. logged out, transient network error) just means
-        // this device stays on `BackgroundRefresh`'s polling fallback for classic
-        // notifications until the next successful registration attempt.
+        // Best-effort -- see `ClassicPushStore.register`, which also flags a login that's
+        // missing the `push` scope.
         Task {
-            try? await appContainer.friendicaAPI().registerApnsToken(hexToken)
+            await appContainer.classicPushStore.register(hexToken: hexToken)
         }
     }
 
@@ -84,6 +84,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             return
         }
         Task {
+            // `chat_counts` (a read receipt changed the counts, e.g. a chat read on another
+            // device): with nothing unread, no sync is needed to know every chat notification
+            // can go. Otherwise the catch-up sync's reconcile removes the read rooms' ones.
+            if userInfo["type"] as? String == "chat_counts" {
+                let unread = userInfo["unread"] as? String ?? "?"
+                Logger(subsystem: "pl.larpnet.ios", category: "ChatCounts").info("chat_counts unread=\(unread, privacy: .public)")
+                if unread == "0" {
+                    await ChatNotifications.removeAllChat()
+                }
+            }
             await appContainer.matrixClientStore.resyncAndWait()
             completionHandler(.newData)
         }
@@ -93,6 +103,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
+        Logger(subsystem: "pl.larpnet.ios", category: "ChatPusher")
+            .error("APNs registration failed: \(error.localizedDescription, privacy: .public)")
         // Nothing actionable -- the classic Friendica notification path (`BackgroundRefresh`)
         // doesn't depend on this at all, and a retry on the next launch is as good as anything
         // we could do here (typically transient: no network, or push not yet provisioned for

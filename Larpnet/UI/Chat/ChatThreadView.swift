@@ -1,14 +1,23 @@
+import PhotosUI
 import SwiftUI
 
 struct ChatThreadView: View {
     @State private var viewModel: ChatThreadViewModel
     @State private var isAtBottom = true
+    @State private var viewportHeight: CGFloat = 0
     @State private var pendingNewMessages = 0
+    /// Newest message timestamp already accounted for. "New" means newer than this -- not "the
+    /// list got longer": back-pagination prepends up to ~90 older messages and a timeline
+    /// reset/clear rebuilds the whole list, and counting those as new made the banner climb
+    /// ("25 nowych", growing) with nothing unread (seen on Android, same logic here).
+    @State private var newestSeen: Date?
+    @State private var pickedPhoto: PhotosPickerItem?
     @Environment(\.scenePhase) private var scenePhase
     private let appContainer: AppContainer
     let onOpenInfo: (String) -> Void
 
     private static let bottomAnchorId = "chat-bottom-anchor"
+    nonisolated private static let scrollSpace = "chat-scroll"
 
     init(target: ChatThreadTarget, appContainer: AppContainer, onOpenInfo: @escaping (String) -> Void) {
         _viewModel = State(initialValue: ChatThreadViewModel(target: target, appContainer: appContainer))
@@ -20,20 +29,41 @@ struct ChatThreadView: View {
         VStack(spacing: 0) {
             ScrollViewReader { scrollProxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    // Not lazy: a lazy stack only estimates the height of rows it hasn't built,
+                    // so "the bottom" moved as they got measured, and both opening a long
+                    // conversation and following new messages landed mid-history (2026-10-28).
+                    // The timeline holds at most a few hundred messages; the trade-off is that
+                    // every image thumbnail in it starts loading on open (they're cached).
+                    VStack(alignment: .leading, spacing: 12) {
                         ForEach(ChatMessageGrouping.build(from: viewModel.messages)) { day in
                             daySeparator(day.date)
                             ForEach(day.clusters) { cluster in
                                 clusterView(cluster)
                             }
                         }
+                        // Bottom = this anchor is inside the viewport (with a little slack for
+                        // the list's padding). Measured by geometry rather than onAppear/
+                        // onDisappear: a lazy stack kept the anchor "appeared" after it scrolled
+                        // off screen, so isAtBottom stuck at true -- the "N new" banner never
+                        // showed and every incoming message yanked a reader of older history
+                        // back to the bottom (seen on the simulator, 2026-10-25).
                         Color.clear.frame(height: 1)
                             .id(Self.bottomAnchorId)
-                            .onAppear { isAtBottom = true; pendingNewMessages = 0 }
-                            .onDisappear { isAtBottom = false }
+                            .onGeometryChange(for: CGFloat.self) { proxy in
+                                proxy.frame(in: .named(Self.scrollSpace)).minY
+                            } action: { anchorY in
+                                let atBottom = anchorY <= viewportHeight + 40
+                                if atBottom != isAtBottom { isAtBottom = atBottom }
+                                if atBottom { pendingNewMessages = 0 }
+                            }
                     }
                     .padding()
                 }
+                .coordinateSpace(.named(Self.scrollSpace))
+                // Opens at the newest message and keeps the bottom in place while the content
+                // above it changes size (back-pagination, images loading, the keyboard).
+                .defaultScrollAnchor(.bottom)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
                 .overlay(alignment: .bottom) {
                     if pendingNewMessages > 0 {
                         Button {
@@ -49,13 +79,18 @@ struct ChatThreadView: View {
                         .padding(.bottom, 8)
                     }
                 }
-                .onChange(of: viewModel.messages.count) { oldCount, newCount in
-                    guard newCount > oldCount else { return }
-                    let justSentOwnMessage = viewModel.messages.last?.isOwn == true
-                    if isAtBottom || justSentOwnMessage {
+                .onChange(of: viewModel.messages) { oldMessages, messages in
+                    guard let newest = messages.map(\.timestamp).max() else { return }
+                    let previous = newestSeen
+                    newestSeen = max(previous ?? newest, newest)
+                    let arrived = previous.map { seen in messages.filter { $0.timestamp > seen } } ?? []
+                    let grew = messages.count > oldMessages.count
+                    if previous == nil {
+                        scrollProxy.scrollTo(Self.bottomAnchorId, anchor: .bottom)
+                    } else if (grew && isAtBottom) || arrived.contains(where: \.isOwn) {
                         withAnimation { scrollProxy.scrollTo(Self.bottomAnchorId, anchor: .bottom) }
-                    } else {
-                        pendingNewMessages += newCount - oldCount
+                    } else if !isAtBottom {
+                        pendingNewMessages += arrived.filter { !$0.isOwn }.count
                     }
                 }
                 .onAppear {
@@ -70,12 +105,26 @@ struct ChatThreadView: View {
             // something", which isn't true here.
             if !viewModel.failedToLoad {
                 HStack {
+                    PhotosPicker(selection: $pickedPhoto, matching: .images) {
+                        Image(systemName: "photo")
+                            .font(.title3)
+                    }
+                    .disabled(viewModel.isSending || viewModel.roomId == nil)
+                    .accessibilityLabel("Send photo")
                     TextField("Message", text: $viewModel.draft)
                         .textFieldStyle(.roundedBorder)
                     Button("Send") { Task { await viewModel.send() } }
                         .disabled(viewModel.isSending || viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding()
+                .overlay(alignment: .top) {
+                    if viewModel.isSending { ProgressView().controlSize(.small) }
+                }
+                .onChange(of: pickedPhoto) { _, item in
+                    guard let item else { return }
+                    pickedPhoto = nil
+                    Task { await viewModel.sendImage(item) }
+                }
             }
         }
         .overlay {
@@ -175,10 +224,15 @@ struct ChatThreadView: View {
                 undecryptableNote
             } else {
                 let bubbleColor: Color = isOwn ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.15)
-                Text(message.body)
-                    .padding(8)
-                    .background(bubbleColor, in: RoundedRectangle(cornerRadius: 16))
-                    .frame(maxWidth: 280, alignment: isOwn ? .trailing : .leading)
+                if let image = message.image {
+                    ChatImageView(image: image, appContainer: appContainer)
+                }
+                if message.image == nil || !message.body.isEmpty {
+                    Text(message.body)
+                        .padding(8)
+                        .background(bubbleColor, in: RoundedRectangle(cornerRadius: 16))
+                        .frame(maxWidth: 280, alignment: isOwn ? .trailing : .leading)
+                }
             }
             if isLastInCluster {
                 Text(message.timestamp, style: .time)

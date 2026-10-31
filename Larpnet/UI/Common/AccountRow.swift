@@ -29,5 +29,8 @@ struct AccountRow: View {
             }
             Spacer(minLength: 0)
         }
+        // Rows sit in `.plain` buttons, which only hit-test drawn content; without this the
+        // empty space between the name and the trailing edge doesn't respond to taps.
+        .contentShape(Rectangle())
     }
 }

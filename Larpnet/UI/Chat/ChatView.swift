@@ -28,8 +28,14 @@ struct ChatView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 }
-                // Long-press: the shared per-room mute (same as Chat info and the web client).
+                // Long-press: mark-as-read (when there's anything to clear) plus the shared
+                // per-room mute (same as Chat info and the web client).
                 .contextMenu {
+                    if room.unreadCount > 0 {
+                        Button("Mark as read", systemImage: "envelope.open") {
+                            Task { await viewModel.markAsRead(room) }
+                        }
+                    }
                     ChatMuteMenuItems(
                         muted: room.muted,
                         onMute: { duration in Task { await viewModel.mute(room, for: duration) } },
@@ -63,6 +69,7 @@ struct ChatView: View {
         }
         .refreshable { await viewModel.refresh() }
         .navigationTitle("Chat")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 // Deliberately not "square.and.pencil" -- that's the exact icon Home/Local use
@@ -70,6 +77,8 @@ struct ChatView: View {
                 // with "new chat" when switching tabs. "plus.bubble" reads unambiguously as
                 // starting a new conversation instead.
                 Button(action: onNewChat) { Image(systemName: "plus.bubble") }
+                    .tint(.white)
+                    .accessibilityLabel("New chat")
             }
         }
         .task { await viewModel.loadInitial() }
@@ -142,5 +151,8 @@ private struct ChatRoomRow: View {
                 }
             }
         }
+        // The row is a `.plain` button label, which only hit-tests drawn content: without
+        // this, tapping the gap between the name and the timestamp did nothing.
+        .contentShape(Rectangle())
     }
 }

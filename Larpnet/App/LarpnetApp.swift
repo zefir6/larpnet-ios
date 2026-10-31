@@ -56,6 +56,12 @@ struct LarpnetApp: App {
                                 appContainer.currentAccountStore.set(account.id)
                             }
                         }
+                        // Same as the relaunch path in `.task` below: chat device + key backup
+                        // right away, not on the next launch.
+                        Task {
+                            try? await appContainer.matrixClientStore.ensureClient()
+                            _ = try? await appContainer.matrixClientStore.ensureEncryption()
+                        }
                     })
                 }
             }
@@ -73,8 +79,15 @@ struct LarpnetApp: App {
                     appContainer.currentAccountStore.set(account.id)
                 }
                 // Start chat in the background at launch, not only when the Chat tab first
-                // opens, so the unread badge is right from the start.
+                // opens, so the unread badge is right from the start. ensureEncryption() too: in
+                // standard mode it silently sets up key backup, so room keys this device gets
+                // before the user ever opens Chat are backed up for their other devices. Any
+                // prompt it returns is ignored here; the Chat tab asks again and shows it.
                 try? await appContainer.matrixClientStore.ensureClient()
+                _ = try? await appContainer.matrixClientStore.ensureEncryption()
+                #if DEBUG
+                await DebugChatPush.runIfRequested(appContainer: appContainer)
+                #endif
             }
             // Catches up the sync loop on every return to the foreground -- including a tap on
             // a chat notification, which also transitions scene phase to `.active` -- rather

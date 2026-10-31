@@ -105,6 +105,13 @@ enum BackgroundRefresh {
             let page = try await api.notifications(sinceId: sinceId)
             guard !page.items.isEmpty else { return }
             defaults.set(page.items.first?.id, forKey: lastSeenNotificationIdKey)
+            // `larpnet_apns` already pushed these to this device -- posting them again here
+            // showed every like/comment/follow twice. Polling is only the fallback for a
+            // device the server has no APNs token for.
+            let tokenStore = appContainer.tokenStore
+            if let registered = tokenStore.classicApnsRegisteredToken, registered == tokenStore.apnsDeviceTokenHex {
+                return
+            }
             await postLocalNotifications(for: page.items)
         } catch {
             // Best-effort background poll -- no user-visible error surface for a failure here.

@@ -11,8 +11,10 @@ struct ChatRoom: Identifiable, Sendable, Hashable {
     let timestamp: Date?
     /// Synapse's notification count (`MatrixClientStore.unreadCount(of:)`) -- drives
     /// the room row's unread styling and the Chat tab's badge. Always 0 for a `muted` room, same
-    /// as Synapse's own notification count (and so every other client's badge).
-    let unreadCount: Int
+    /// as Synapse's own notification count (and so every other client's badge). `var`, not
+    /// `let`, so `ChatViewModel.markAsRead()` can zero it optimistically the same way
+    /// `muted`/`mutedUntil` already do for mute -- the next sync confirms it shortly after.
+    var unreadCount: Int
     /// `mxc://` room avatar, from `Room.avatarUrl()` (falling back to the 1:1 hero's own avatar
     /// when the room itself has none) -- resolved to a real image via
     /// `MatrixClientStore.avatarThumbnail(mxcUrl:)`, not just an initials placeholder.
@@ -49,6 +51,17 @@ struct ChatMessage: Identifiable, Sendable, Hashable {
     /// `ChatThreadView` renders this as a distinct inline note instead of a normal bubble;
     /// `body` is empty and unused in this case.
     let isUndecryptable: Bool
+    /// Set for an `m.image` message; `body` is then its caption (usually empty).
+    var image: ChatImage? = nil
+}
+
+/// An image message's media, display-ready -- loaded via `MatrixClientStore.chatImage(_:)`.
+struct ChatImage: Sendable, Hashable {
+    /// `MediaSource.toJson()`: the SDK object isn't Hashable, and for an encrypted room it's
+    /// what carries the decryption key -- so it's kept whole, never reduced to its `mxc://` URL.
+    let sourceJson: String
+    let width: Int?
+    let height: Int?
 }
 
 /// One other member of a room, display-ready -- `MatrixClientStore.roomInfo()`'s member list.

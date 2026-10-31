@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var chatPath: [AppRoute] = []
     @State private var morePath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
+    @State private var showClassicPushPrompt = false
 
     var body: some View {
         TabView {
@@ -40,6 +41,20 @@ struct RootView: View {
                 .tag("more")
         }
         .tint(LarpnetTheme.accent)
+        // Once per login: an older login lacks the `push` scope (see `ClassicPushStore`).
+        // Settings keeps offering the same button afterwards.
+        .onChange(of: appContainer.classicPushStore.needsSignIn, initial: true) { _, needsSignIn in
+            guard needsSignIn, appContainer.tokenStore.pushEnabled,
+                  !appContainer.tokenStore.classicPushPromptShown else { return }
+            appContainer.tokenStore.classicPushPromptShown = true
+            showClassicPushPrompt = true
+        }
+        .alert("Turn on notifications", isPresented: $showClassicPushPrompt) {
+            Button("Sign in") { Task { try? await appContainer.classicPushStore.signIn() } }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("To get notifications about likes, comments and follows, sign in once more to give the app permission. You can also do this later in Settings.")
+        }
         .sheet(item: $composeContext) { context in
             ComposeView(context: context, appContainer: appContainer, onPosted: {})
         }
@@ -338,19 +353,14 @@ struct RootView: View {
                             onNewChat: { path.wrappedValue.append(.newChat) }
                         )
                     case .newChat:
-                        SearchView(
+                        NewChatView(
                             appContainer: appContainer,
-                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
                             onSelectAccount: { account in
                                 path.wrappedValue.removeLast()
-                                // Matrix identities only exist for local users (see
-                                // `larpnet_matrix_localpart()`) -- `username`, not `acct`, is
-                                // the Friendica nickname. `chatRecipientMode` below already
-                                // filters results to local accounts only, so this is never a
-                                // not-actually-chattable remote pick.
+                                // `username`, not `acct`, is the Friendica nickname; the picker
+                                // only offers local accounts, which all have a Matrix identity.
                                 path.wrappedValue.append(.chatThread(.nickname(account.username)))
                             },
-                            chatRecipientMode: true,
                             onEnterMatrixAddress: { address in
                                 path.wrappedValue.removeLast()
                                 path.wrappedValue.append(.chatThread(.matrixId(address)))
@@ -368,9 +378,9 @@ struct RootView: View {
                             onLeft: { path.wrappedValue.removeLast(min(2, path.wrappedValue.count)) }
                         )
                     case .addChatMember(let roomId):
-                        SearchView(
+                        NewChatView(
                             appContainer: appContainer,
-                            onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                            title: "Add person",
                             onSelectAccount: { account in
                                 Task {
                                     try? await appContainer.matrixClientStore.inviteMember(
@@ -378,8 +388,7 @@ struct RootView: View {
                                     )
                                     await MainActor.run { path.wrappedValue.removeLast() }
                                 }
-                            },
-                            chatRecipientMode: true
+                            }
                         )
                     case .blockedAccounts:
                         BlockedAccountsView(appContainer: appContainer)

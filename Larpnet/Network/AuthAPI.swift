@@ -8,7 +8,9 @@ struct AuthAPI: Sendable {
     let baseURL: URL
     let session: URLSession
 
-    static let scope = "read write follow"
+    /// `push` is what `POST /larpnet_apns` checks (classic notifications) -- see
+    /// `ClassicPushStore` for logins made before it was added. Same list as Android's.
+    static let scope = "read write follow push"
 
     func registerApp(clientName: String, redirectURI: String) async throws -> AppRegistration {
         try await postForm(

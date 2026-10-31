@@ -51,6 +51,9 @@ struct SettingsView: View {
                 Text("Best-effort background refresh -- iOS does not guarantee an interval.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if viewModel.pushEnabled, appContainer.classicPushStore.needsSignIn {
+                    ClassicPushSignInRow(store: appContainer.classicPushStore)
+                }
             }
 
             Section {
@@ -226,6 +229,36 @@ struct SettingsView: View {
 /// (`ChatView`'s `.sheet` on `ensureEncryption()`), and tapping "Later" there used to leave no
 /// way back in -- confirmed live: a device stuck in that state shows every conversation as
 /// empty, not just undecryptable placeholders. Safe to run even when already unlocked.
+/// Shown while the login lacks the `push` scope -- see `ClassicPushStore`.
+private struct ClassicPushSignInRow: View {
+    let store: ClassicPushStore
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Likes, comments and follows need one more permission: sign in once more to allow notifications.")
+                .font(.caption)
+            Button {
+                Task {
+                    do {
+                        try await store.signIn()
+                        errorMessage = nil
+                    } catch OAuthFlow.OAuthError.cancelled {
+                    } catch {
+                        errorMessage = String(describing: error)
+                    }
+                }
+            } label: {
+                if store.isSigningIn { ProgressView() } else { Text("Turn on notifications") }
+            }
+            .disabled(store.isSigningIn)
+            if let errorMessage {
+                Text(errorMessage).font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+}
+
 private struct ChatEncryptionRows: View {
     let appContainer: AppContainer
     @State private var encryption: MatrixEncryptionInfo?

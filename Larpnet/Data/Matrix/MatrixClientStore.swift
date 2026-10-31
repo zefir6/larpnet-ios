@@ -1,5 +1,6 @@
 import Foundation
 import MatrixRustSDK
+import os
 
 enum MatrixError: Error {
     case malformedIdentity
@@ -44,6 +45,14 @@ final class MatrixClientStore {
 
     private var client: Client?
     private var syncHandle: TaskHandle?
+    /// The `ensureEncryption()` run in flight, shared by concurrent callers: it now runs at
+    /// launch (`LarpnetApp`) as well as when the Chat tab opens, and two interleaved runs could
+    /// both see pending + `.disabled` and set up recovery twice.
+    private var encryptionTask: Task<RecoveryPromptKind?, Error>?
+    /// The `ensureClient()` login in flight, shared by concurrent callers for the same reason:
+    /// launch, the Chat tab and `registerPusher` (APNs token callback) all call it at once, and
+    /// two interleaved logins would each build a client and start a sync loop.
+    private var clientTask: Task<Client, Error>?
     private var roomListContinuation: AsyncStream<Void>.Continuation?
     /// nickname (lowercased) -> Friendica display name, from the same `contacts` list the web
     /// client's `resolveDisplayName()` uses -- covers anyone who's never opened chat themselves
@@ -88,7 +97,16 @@ final class MatrixClientStore {
     @discardableResult
     func ensureClient() async throws -> Client {
         if let client { return client }
+        if let running = clientTask {
+            return try await running.value
+        }
+        let task = Task { try await ensureClientUnshared() }
+        clientTask = task
+        defer { clientTask = nil }
+        return try await task.value
+    }
 
+    private func ensureClientUnshared() async throws -> Client {
         let identity = try await friendicaAPI().matrixLogin()
         contactsByLocalpart = Dictionary(
             uniqueKeysWithValues: identity.contacts.map { ($0.nickname.lowercased(), $0.name) }
@@ -110,13 +128,14 @@ final class MatrixClientStore {
             Self.discardEventCache(in: sessionDir)
             tokenStore.matrixEventCacheResetVersion = Self.matrixEventCacheResetVersion
         }
-        let newClient = try await ClientBuilder()
-            .homeserverUrl(url: identity.homeserver)
-            .sessionPaths(dataPath: sessionDir.path, cachePath: sessionDir.path)
-            .build()
+        let newClient = try await MatrixClientConfig.builder(homeserver: identity.homeserver, sessionDir: sessionDir).build()
         try await newClient.customLoginWithJwt(
             jwt: identity.token, initialDeviceName: "larpnet iOS", deviceId: deviceId()
         )
+        // For NotificationServiceExtension, so a push doesn't need a login of its own.
+        if let session = try? newClient.session() {
+            MatrixSavedSession(session).save(to: tokenStore)
+        }
 
         // One blocking sync before this call returns -- `rooms()`/`getDmRoom()`/`getRoom()`
         // all read local state that only exists once at least one sync has landed. Confirmed
@@ -131,6 +150,13 @@ final class MatrixClientStore {
 
         client = newClient
         startSyncLoop(newClient)
+        // The APNs token usually arrives before this login finishes, so `AppDelegate`'s own
+        // `registerPusher` call can't be relied on alone -- register again from the cached
+        // token now that there's a gateway URL. Not awaited: it calls `ensureClient()`, which
+        // returns `client` right away from here on.
+        if tokenStore.pushEnabled, let pushkey = tokenStore.apnsDeviceTokenHex {
+            Task { await registerPusher(pushkey: pushkey) }
+        }
         return newClient
     }
 
@@ -189,6 +215,32 @@ final class MatrixClientStore {
             defer { joiningInvites.remove(roomId) }
             try? await room.join()
         }
+    }
+
+    /// Local Larpnet nicknames of 1:1 chat partners, newest conversation first -- the "Recent"
+    /// section of the new-chat picker (same idea as the web client's `recentPeerNicknames`).
+    /// Doesn't go through `rooms()`/`ChatRoom.peerUserId`, which is only set for rooms without
+    /// an avatar. Federated peers are skipped: they have no Friendica account to pick.
+    func recentDirectChatNicknames(limit: Int = 8) async -> [String] {
+        guard let client = try? await ensureClient(), let ownServer = serverName else { return [] }
+        var scored: [(nickname: String, timestamp: Date?)] = []
+        for room in client.rooms() where room.membership() == .joined {
+            let others = await otherMemberIds(of: room)
+            guard others.count == 1,
+                  Self.serverName(fromMxid: others[0]) == ownServer,
+                  let localpart = Self.localpart(of: others[0])
+            else { continue }
+            let (_, timestamp) = await preview(for: room)
+            scored.append((localpart, timestamp))
+        }
+        var seen = Set<String>()
+        var result: [String] = []
+        for entry in scored.sorted(by: { ($0.timestamp ?? .distantPast) > ($1.timestamp ?? .distantPast) }) {
+            guard seen.insert(entry.nickname).inserted else { continue }
+            result.append(entry.nickname)
+            if result.count == limit { break }
+        }
+        return result
     }
 
     func rooms() async throws -> [ChatRoom] {
@@ -375,6 +427,20 @@ final class MatrixClientStore {
         return try await client.getMediaThumbnail(mediaSource: source, width: UInt64(size), height: UInt64(size))
     }
 
+    /// Full bytes of a chat image (see `ChatImage`). Always the original, not a server
+    /// thumbnail: an encrypted image has no server-side thumbnail, and the apps send none of
+    /// their own (same as the web client), so callers downscale locally.
+    func chatImage(_ image: ChatImage) async throws -> Data {
+        let client = try await ensureClient()
+        let source = try MediaSource.fromJson(json: image.sourceJson)
+        return try await client.getMediaContent(mediaSource: source)
+    }
+
+    /// The homeserver's upload limit (`m.upload.size`), as the web composer checks it.
+    func maxUploadSize() async throws -> Int {
+        Int(try await ensureClient().getMaxMediaUploadSize())
+    }
+
     /// Finds the existing 1:1 room with this nickname, or creates one -- same "1:1 == exactly
     /// this other member" heuristic and encrypted-by-default behavior as the web client's
     /// `findOrCreateDirectRoom()`. `nickname` is a plain Friendica nickname (e.g. from
@@ -528,6 +594,16 @@ final class MatrixClientStore {
     /// - Standard, active: restore silently if `.incomplete` -- on failure fall back to the
     ///   manual prompt, **never** reset, so a transient error can't wipe history.
     func ensureEncryption() async throws -> RecoveryPromptKind? {
+        if let running = encryptionTask {
+            return try await running.value
+        }
+        let task = Task { try await ensureEncryptionUnshared() }
+        encryptionTask = task
+        defer { encryptionTask = nil }
+        return try await task.value
+    }
+
+    private func ensureEncryptionUnshared() async throws -> RecoveryPromptKind? {
         try await ensureClient()
         guard let enc = encryptionInfo, enc.isStandard, let passphrase = enc.passphrase else {
             return try await recoveryPromptKind()
@@ -786,10 +862,7 @@ final class MatrixClientStore {
     private func discardLocalSession(_ identity: MatrixLoginResponse) async {
         if let oldDeviceId = tokenStore.matrixDeviceId,
            let dir = try? MatrixSessionPaths.sessionDirectory(for: identity.userId),
-           let old = try? await ClientBuilder()
-               .homeserverUrl(url: identity.homeserver)
-               .sessionPaths(dataPath: dir.path, cachePath: dir.path)
-               .build() {
+           let old = try? await MatrixClientConfig.builder(homeserver: identity.homeserver, sessionDir: dir).build() {
             if (try? await old.customLoginWithJwt(
                 jwt: identity.token, initialDeviceName: "larpnet iOS", deviceId: oldDeviceId
             )) != nil {
@@ -839,20 +912,44 @@ final class MatrixClientStore {
     /// than accumulating duplicates across re-logins/token refreshes -- the pushkey (APNs
     /// device token) is the actual identity here, not the device id, so there's nothing worth
     /// keeping from a previous registration.
+    ///
+    /// `ensureClient()` before reading `pushGatewayUrl`, not after: the URL is only known once
+    /// that login has returned, and the APNs token callback almost always fires before it does
+    /// -- checking first meant the pusher was silently never registered (same order as
+    /// larpnet-android's `MatrixRepository.registerPusher`).
     func registerPusher(deviceToken: Data) async {
-        guard let gatewayUrl = pushGatewayUrl else { return }
-        guard let client = try? await ensureClient() else { return }
-        let pushkey = Self.hexEncode(deviceToken)
-        try? await client.setPusher(
-            identifiers: PusherIdentifiers(pushkey: pushkey, appId: "pl.larpnet.ios"),
-            kind: .http(data: HttpPusherData(url: gatewayUrl, format: .eventIdOnly, defaultPayload: "{}")),
-            appDisplayName: "Larpnet iOS",
-            deviceDisplayName: "Larpnet iOS",
-            profileTag: nil,
-            lang: "pl",
-            append: false
-        )
+        await registerPusher(pushkey: Self.hexEncode(deviceToken))
     }
+
+    func registerPusher(pushkey: String) async {
+        let client: Client
+        do {
+            client = try await ensureClient()
+        } catch {
+            Self.pushLog.error("registerPusher: no client: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard let gatewayUrl = pushGatewayUrl else {
+            Self.pushLog.info("registerPusher: server has no push gateway configured")
+            return
+        }
+        do {
+            try await client.setPusher(
+                identifiers: PusherIdentifiers(pushkey: pushkey, appId: "pl.larpnet.ios"),
+                kind: .http(data: HttpPusherData(url: gatewayUrl, format: .eventIdOnly, defaultPayload: "{}")),
+                appDisplayName: "Larpnet iOS",
+                deviceDisplayName: "Larpnet iOS",
+                profileTag: nil,
+                lang: "pl",
+                append: false
+            )
+            Self.pushLog.info("registerPusher: pusher set")
+        } catch {
+            Self.pushLog.error("registerPusher: setPusher failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static let pushLog = Logger(subsystem: "pl.larpnet.ios", category: "ChatPusher")
 
     /// Called when the user turns off push notifications (Settings) without logging out
     /// entirely -- `clearSession()`'s own `logout()` call already removes every pusher for
@@ -934,7 +1031,9 @@ final class MatrixClientStore {
     /// push rule itself arrives over sync shortly after.
     func muteRoom(roomId: String, until: Date?) async throws -> [String: Date?] {
         let millis = until.map { Int64($0.timeIntervalSince1970 * 1000) }
-        return Self.dates(try await friendicaAPI().matrixMute(action: "mute", roomId: roomId, untilMillis: millis).mutes)
+        let mutes = Self.dates(try await friendicaAPI().matrixMute(action: "mute", roomId: roomId, untilMillis: millis).mutes)
+        await ChatNotifications.remove(roomId: roomId)
+        return mutes
     }
 
     func unmuteRoom(roomId: String) async throws -> [String: Date?] {
@@ -948,19 +1047,28 @@ final class MatrixClientStore {
     private static let muteAccountDataType = "pl.larpnet.mute_until"
 
     /// Recomputes the unread-room count for `onUnreadCountChange`; skipped while one is already
-    /// running (that one reads the latest state anyway).
-    private func recountUnread(_ client: Client) async {
+    /// running (that one reads the latest state anyway). `fromSyncResponse`: also removes the
+    /// delivered notifications of rooms that are now read (`ChatNotifications.reconcile`) --
+    /// only right after a sync response, since before one (a sync loop just restarted after
+    /// iOS suspended the app) the local state can predate pushes already shown.
+    private func recountUnread(_ client: Client, fromSyncResponse: Bool = false) async {
         guard !isRecountingUnread else { return }
         isRecountingUnread = true
         defer { isRecountingUnread = false }
         let mutes = await muteStates(client)
         var count = 0
-        for room in client.rooms() where room.membership() == .joined && !mutes.keys.contains(room.id()) {
-            if await Self.unreadCount(of: room) > 0 {
+        var readRoomIds: Set<String> = []
+        for room in client.rooms() where room.membership() == .joined {
+            if !mutes.keys.contains(room.id()), await Self.unreadCount(of: room) > 0 {
                 count += 1
+            } else {
+                readRoomIds.insert(room.id())
             }
         }
         onUnreadCountChange?(count)
+        if fromSyncResponse {
+            await ChatNotifications.reconcile(readRoomIds: readRoomIds)
+        }
     }
 
     /// Forces a fresh `/sync` round rather than waiting for the continuous `syncV2` loop's
@@ -998,7 +1106,7 @@ final class MatrixClientStore {
         let bridge = SyncTickBridge { [weak self] in
             Task { @MainActor in
                 self?.roomListContinuation?.yield()
-                await self?.recountUnread(client)
+                await self?.recountUnread(client, fromSyncResponse: true)
             }
         }
         syncHandle = client.syncV2(settings: SyncSettingsV2(fullState: false), listener: bridge)
@@ -1088,7 +1196,7 @@ final class MatrixClientStore {
     private static func previewText(for content: TimelineItemContent) -> String? {
         guard case .msgLike(let msgLike) = content else { return nil }
         switch msgLike.kind {
-        case .message(let message): return message.body
+        case .message(let message): return MatrixNotificationPreview.mediaLabel(for: message.msgType) ?? message.body
         case .unableToDecrypt: return "🔒"
         default: return nil
         }
@@ -1159,6 +1267,21 @@ final class ChatTimelineHandle {
         _ = try await timeline.send(msg: messageEventContentFromMarkdown(md: text))
     }
 
+    /// Sends an already-encoded JPEG as `m.image`. The SDK uploads it (encrypted, in an
+    /// encrypted room) and builds the same content shape the web client sends and renders.
+    func sendImage(jpeg: Data, width: Int, height: Int) async throws {
+        let info = ImageInfo(
+            height: UInt64(height), width: UInt64(width), mimetype: "image/jpeg", size: UInt64(jpeg.count),
+            thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: false
+        )
+        let filename = "IMG_\(Int(Date().timeIntervalSince1970)).jpg"
+        let params = UploadParameters(
+            source: .data(bytes: jpeg, filename: filename),
+            caption: nil, formattedCaption: nil, mentions: nil, inReplyTo: nil
+        )
+        try await timeline.sendImage(params: params, thumbnailSource: nil, imageInfo: info).join()
+    }
+
     /// Stops the timeline listener -- call when the thread screen closes, so the room's
     /// timeline diff subscription doesn't keep running (and retaining `self`) after the view
     /// that cares about it is gone.
@@ -1188,10 +1311,24 @@ final class ChatTimelineHandle {
 
     private func chatMessage(from item: TimelineItem) -> ChatMessage? {
         guard let event = item.asEvent(), case .msgLike(let msgLike) = event.content else { return nil }
-        let body: String
+        var body: String
         let isUndecryptable: Bool
+        var image: ChatImage?
         switch msgLike.kind {
-        case .message(let message): body = message.body; isUndecryptable = false
+        case .message(let message):
+            body = message.body
+            isUndecryptable = false
+            switch message.msgType {
+            case .image(let content):
+                image = ChatImage(
+                    sourceJson: content.source.toJson(),
+                    width: content.info?.width.map(Int.init), height: content.info?.height.map(Int.init)
+                )
+                body = content.caption ?? ""
+            case .file(let content): body = "📎 \(content.filename)"
+            case .video(let content): body = "🎬 \(content.filename)"
+            default: break
+            }
         case .unableToDecrypt: body = ""; isUndecryptable = true
         case .redacted: return nil
         default: return nil
@@ -1209,7 +1346,8 @@ final class ChatTimelineHandle {
             senderId: event.isOwn ? nil : event.sender,
             senderDisplayName: event.isOwn ? nil : resolveDisplayName(event.sender, sdkDisplayName),
             senderAvatarUrl: event.isOwn ? nil : avatarUrl,
-            isUndecryptable: isUndecryptable
+            isUndecryptable: isUndecryptable,
+            image: image
         )
     }
 }

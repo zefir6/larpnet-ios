@@ -1,5 +1,7 @@
 import Foundation
-import UserNotifications
+import PhotosUI
+import SwiftUI
+import UIKit
 
 /// Either an already-known room (opened from the room list, which already has its display
 /// name), a bare Friendica nickname (opened from a profile's "Chat" button or the new-chat
@@ -51,6 +53,7 @@ final class ChatThreadViewModel {
     /// arrives while the app is in the background stays unread.
     private var isVisible = false
     private var lastReadMessageId: String?
+    private var isMarkingRead = false
 
     init(target: ChatThreadTarget, appContainer: AppContainer) {
         self.target = target
@@ -117,6 +120,53 @@ final class ChatThreadViewModel {
         }
     }
 
+    /// Sends a photo from the picker as `m.image`: re-encoded as JPEG and downscaled to at most
+    /// `maxImageSide` px (a full-resolution camera photo is 5-10 MB of mostly wasted upload),
+    /// then checked against the server's upload limit the way the web composer does.
+    func sendImage(_ item: PhotosPickerItem) async {
+        guard let handle else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let picked = UIImage(data: data) else {
+                errorMessage = "Couldn't read that photo"
+                return
+            }
+            let image = Self.downscaled(picked, maxSide: Self.maxImageSide)
+            guard let jpeg = image.jpegData(compressionQuality: 0.85) else {
+                errorMessage = "Couldn't read that photo"
+                return
+            }
+            if let limit = try? await appContainer.matrixClientStore.maxUploadSize(), jpeg.count > limit {
+                errorMessage = "Photo is too large (server limit: \(limit / 1_000_000) MB)"
+                return
+            }
+            try await handle.sendImage(
+                jpeg: jpeg, width: Int(image.size.width * image.scale), height: Int(image.size.height * image.scale)
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private static let maxImageSide: CGFloat = 2048
+
+    /// Also bakes in the orientation: `UIGraphicsImageRenderer` draws the image upright, so the
+    /// JPEG needs no EXIF orientation (which not every Matrix client honours).
+    private static func downscaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+        let pixelWidth = image.size.width * image.scale
+        let pixelHeight = image.size.height * image.scale
+        let factor = min(1, maxSide / max(pixelWidth, pixelHeight))
+        let target = CGSize(width: (pixelWidth * factor).rounded(), height: (pixelHeight * factor).rounded())
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
+
     /// Called by the view on appear/disappear and scene-phase changes.
     func setVisible(_ visible: Bool) {
         isVisible = visible
@@ -125,29 +175,35 @@ final class ChatThreadViewModel {
             badgeStore.visibleRoomId = roomId
             lastReadMessageId = nil
             markReadIfVisible()
-            Task { await Self.removeDeliveredNotifications(roomId: roomId) }
+            Task { await ChatNotifications.remove(roomId: roomId) }
         } else if !visible, badgeStore.visibleRoomId == roomId {
             badgeStore.visibleRoomId = nil
         }
     }
 
-    /// Read receipt for the newest message, once per new message while on screen.
+    /// Read receipt for the newest message, once per new message while on screen. Deliberately
+    /// does *not* set `lastReadMessageId` until `sendReadReceipt` actually succeeds: marking it
+    /// read locally before the server confirms would permanently poison the `newest !=
+    /// lastReadMessageId` guard above on a transient failure (network hiccup, sync loop
+    /// mid-restart) -- the room's unread bubble would then never clear until a newer message
+    /// bumped `newest` to a different id, exactly the "opening the conversation doesn't clear
+    /// the badge" symptom reported 2026-10-17. Same class of bug as this app's other
+    /// local-cache-vs-server-truth mismatches -- see `resetRecovery()`'s doc comment.
     private func markReadIfVisible() {
-        guard isVisible, let handle,
+        guard isVisible, !isMarkingRead, let handle,
               let newest = messages.last(where: { $0.eventId != nil })?.eventId,
               newest != lastReadMessageId else { return }
-        lastReadMessageId = newest
-        Task { try? await handle.sendReadReceipt(eventId: newest) }
-    }
-
-    /// The NSE groups a room's pushes under `threadIdentifier = roomId`; opening the room
-    /// clears them from Notification Center.
-    private static func removeDeliveredNotifications(roomId: String) async {
-        let center = UNUserNotificationCenter.current()
-        let ids = await center.deliveredNotifications()
-            .filter { $0.request.content.threadIdentifier == roomId }
-            .map(\.request.identifier)
-        center.removeDeliveredNotifications(withIdentifiers: ids)
+        isMarkingRead = true
+        Task {
+            defer { isMarkingRead = false }
+            do {
+                try await handle.sendReadReceipt(eventId: newest)
+                lastReadMessageId = newest
+            } catch {
+                // Left unset on purpose -- see doc comment above. The next message update (or
+                // re-opening the thread) retries.
+            }
+        }
     }
 
     func close() {

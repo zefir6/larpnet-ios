@@ -43,6 +43,7 @@ struct ConversationsView: View {
         }
         .refreshable { await viewModel.refresh() }
         .navigationTitle("Messages")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onNewMessage) { Image(systemName: "square.and.pencil") }
