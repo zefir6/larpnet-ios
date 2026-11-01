@@ -45,6 +45,9 @@ struct ChatView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // insetGrouped's default top inset (~35 pt) left an empty strip under the bar that
+        // made the Chat header look taller than Home's; match the feed's tight spacing.
+        .contentMargins(.top, 8, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(LarpnetTheme.pageBackground)
         .confirmationDialog(
