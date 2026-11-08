@@ -21,28 +21,42 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    // Both delegate methods below use the completion-handler form and call the handler on the
+    // main actor. The `nonisolated ... async` form returns to UIKit from a background thread,
+    // and on iOS 27 UIKit asserts on that: tapping any notification while the app was running
+    // crashed it (SIGABRT in `_performBlockAfterCATransactionCommitSynchronizes:`, 1.49).
+
     /// Foreground pushes: shown as a normal banner, except a chat message for the room that's
     /// already on screen (`ChatBadgeStore.visibleRoomId`).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void
+    ) {
         let roomId = notification.request.content.userInfo["room_id"] as? String
-        let visibleRoomId = await MainActor.run { appContainer?.chatBadgeStore.visibleRoomId }
-        if let roomId, roomId == visibleRoomId {
-            return []
+        Task { @MainActor in
+            if let roomId, roomId == self.appContainer?.chatBadgeStore.visibleRoomId {
+                completionHandler([])
+            } else {
+                completionHandler([.banner, .list, .sound, .badge])
+            }
         }
-        return [.banner, .list, .sound, .badge]
     }
 
     /// Tapping a chat notification opens that room (`RootView` presents
     /// `ChatBadgeStore.pendingRoomId`).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        guard let roomId = response.notification.request.content.userInfo["room_id"] as? String, !roomId.isEmpty else { return }
-        await MainActor.run { appContainer?.chatBadgeStore.pendingRoomId = roomId }
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping @Sendable () -> Void
+    ) {
+        let roomId = response.notification.request.content.userInfo["room_id"] as? String
+        Task { @MainActor in
+            if let roomId, !roomId.isEmpty {
+                self.appContainer?.chatBadgeStore.pendingRoomId = roomId
+            }
+            completionHandler()
+        }
     }
 
     func application(
