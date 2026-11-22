@@ -49,8 +49,15 @@ struct ProfileView: View {
                         .clipShape(Circle())
                     Text(account.displayName.isEmpty ? account.username : account.displayName)
                         .font(.title3.bold())
-                    Text("@\(account.acct.isEmpty ? account.username : account.acct)")
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text("@\(account.acct.isEmpty ? account.username : account.acct)")
+                            .foregroundStyle(.secondary)
+                        // Web: "Kopiuj link do profilu" on the profile card.
+                        if let profileURL = URL(string: account.url), !account.url.isEmpty {
+                            CopyLinkButton(url: profileURL, compact: true)
+                                .font(.subheadline)
+                        }
+                    }
                     HTMLContentView(html: account.note)
                         .font(.subheadline)
                     HStack(spacing: 16) {

@@ -291,8 +291,20 @@ struct RootView: View {
         }
     }
 
+    /// Chat only knows a person's Friendica nickname (Matrix localpart), not their API account
+    /// id -- resolve it, then push the regular profile screen.
+    private func openProfile(nickname: String, path: Binding<[AppRoute]>) {
+        Task {
+            guard let account = try? await appContainer.friendicaAPI().lookupLocalAccount(nickname: nickname) else { return }
+            path.wrappedValue.append(.profile(accountId: account.id))
+        }
+    }
+
     @ViewBuilder
     private func tabStack<Content: View>(path: Binding<[AppRoute]>, @ViewBuilder content: () -> Content) -> some View {
+        // Typed up front: an inline closure in the big route switch below pushed the type
+        // checker over its time limit.
+        let openProfileByNickname: (String) -> Void = { openProfile(nickname: $0, path: path) }
         NavigationStack(path: path) {
             content()
                 .larpnetNavigationBarStyle()
@@ -369,13 +381,15 @@ struct RootView: View {
                     case .chatThread(let target):
                         ChatThreadView(
                             target: target, appContainer: appContainer,
-                            onOpenInfo: { path.wrappedValue.append(.chatRoomInfo(roomId: $0)) }
+                            onOpenInfo: { path.wrappedValue.append(.chatRoomInfo(roomId: $0)) },
+                            onOpenProfile: openProfileByNickname
                         )
                     case .chatRoomInfo(let roomId):
                         ChatRoomInfoView(
                             roomId: roomId, appContainer: appContainer,
                             onAddMember: { path.wrappedValue.append(.addChatMember(roomId: roomId)) },
-                            onLeft: { path.wrappedValue.removeLast(min(2, path.wrappedValue.count)) }
+                            onLeft: { path.wrappedValue.removeLast(min(2, path.wrappedValue.count)) },
+                            onOpenProfile: openProfileByNickname
                         )
                     case .addChatMember(let roomId):
                         NewChatView(

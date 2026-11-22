@@ -15,14 +15,20 @@ struct ChatThreadView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let appContainer: AppContainer
     let onOpenInfo: (String) -> Void
+    /// nil where the thread is shown outside a navigation stack (the notification sheet).
+    let onOpenProfile: ((String) -> Void)?
 
     private static let bottomAnchorId = "chat-bottom-anchor"
     nonisolated private static let scrollSpace = "chat-scroll"
 
-    init(target: ChatThreadTarget, appContainer: AppContainer, onOpenInfo: @escaping (String) -> Void) {
+    init(
+        target: ChatThreadTarget, appContainer: AppContainer,
+        onOpenInfo: @escaping (String) -> Void, onOpenProfile: ((String) -> Void)? = nil
+    ) {
         _viewModel = State(initialValue: ChatThreadViewModel(target: target, appContainer: appContainer))
         self.appContainer = appContainer
         self.onOpenInfo = onOpenInfo
+        self.onOpenProfile = onOpenProfile
     }
 
     var body: some View {
@@ -154,12 +160,22 @@ struct ChatThreadView: View {
         .toolbar {
             if viewModel.roomId != nil {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
+                    let header = HStack(spacing: 8) {
                         MatrixAvatarView(
                             avatarUrl: viewModel.avatarUrl, name: viewModel.roomName ?? "Chat", size: 28,
                             userId: viewModel.peerUserId, appContainer: appContainer
                         )
                         Text(viewModel.roomName ?? "Chat").font(.headline).lineLimit(1)
+                    }
+                    // 1:1: the person's avatar + name open their profile (web: the header's
+                    // `lnc-header-person` link).
+                    if !viewModel.isGroup, let onOpenProfile,
+                       let nickname = appContainer.matrixClientStore.friendicaNickname(userId: viewModel.peerUserId) {
+                        Button { onOpenProfile(nickname) } label: { header }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("View profile")
+                    } else {
+                        header
                     }
                 }
             }
@@ -194,20 +210,25 @@ struct ChatThreadView: View {
         HStack(alignment: .bottom, spacing: 8) {
             if !cluster.isOwn {
                 if viewModel.isGroup {
-                    MatrixAvatarView(
-                        avatarUrl: cluster.senderAvatarUrl, name: cluster.senderDisplayName ?? "?",
-                        size: 28, userId: cluster.senderId, appContainer: appContainer
-                    )
+                    // Group rooms: the sender's avatar and name open their profile.
+                    profileTapTarget(userId: cluster.senderId) {
+                        MatrixAvatarView(
+                            avatarUrl: cluster.senderAvatarUrl, name: cluster.senderDisplayName ?? "?",
+                            size: 28, userId: cluster.senderId, appContainer: appContainer
+                        )
+                    }
                 } else {
                     Color.clear.frame(width: 28, height: 28)
                 }
             }
             VStack(alignment: cluster.isOwn ? .trailing : .leading, spacing: 3) {
                 if !cluster.isOwn, viewModel.isGroup, let senderDisplayName = cluster.senderDisplayName {
-                    Text(senderDisplayName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
+                    profileTapTarget(userId: cluster.senderId) {
+                        Text(senderDisplayName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                    }
                 }
                 ForEach(Array(cluster.messages.enumerated()), id: \.element.id) { index, message in
                     messageBubble(message, isOwn: cluster.isOwn, isLastInCluster: index == cluster.messages.count - 1)
@@ -215,6 +236,19 @@ struct ChatThreadView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: cluster.isOwn ? .trailing : .leading)
+    }
+
+    /// Wraps [content] in a plain button opening [userId]'s Larpnet profile, or leaves it as is
+    /// for a user who isn't a local Larpnet account.
+    @ViewBuilder
+    private func profileTapTarget<Content: View>(userId: String?, @ViewBuilder content: () -> Content) -> some View {
+        if let onOpenProfile, let nickname = appContainer.matrixClientStore.friendicaNickname(userId: userId) {
+            Button { onOpenProfile(nickname) } label: { content() }
+                .buttonStyle(.plain)
+                .accessibilityHint("View profile")
+        } else {
+            content()
+        }
     }
 
     @ViewBuilder
