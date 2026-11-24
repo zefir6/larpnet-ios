@@ -39,6 +39,7 @@ enum DebugChatPush {
         content.title = "Larpnet"
         content.body = "New message"
         content.threadIdentifier = roomId
+        content.sound = ChatSound.current.notificationSound
         content.userInfo = ["room_id": roomId, "event_id": ids[nth]]
         if let preview = await MatrixChatPushResolver.preview(roomId: roomId, eventId: ids[nth], tokenStore: appContainer.tokenStore) {
             content.title = preview.title

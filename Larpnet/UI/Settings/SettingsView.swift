@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
     @AppStorage("show_chat_timestamps") private var showChatTimestamps = true
     @AppStorage(ChatNameDisplay.defaultsKey) private var chatNameDisplay = ChatNameDisplay.full.rawValue
+    /// Re-read when the row reappears, i.e. on coming back from `ChatSoundPickerView`.
+    @State private var chatSoundLabel = ChatSound.current.label
     let onLoggedOut: () -> Void
     private let appContainer: AppContainer
 
@@ -124,6 +126,12 @@ struct SettingsView: View {
                 .onChange(of: chatNameDisplay) { _, value in
                     appContainer.matrixClientStore.setChatNameDisplay(ChatNameDisplay(rawValue: value) ?? .full)
                 }
+                NavigationLink {
+                    ChatSoundPickerView()
+                } label: {
+                    LabeledContent("Message sound", value: chatSoundLabel)
+                }
+                .onAppear { chatSoundLabel = ChatSound.current.label }
                 ChatEncryptionRows(appContainer: appContainer)
             }
 
