@@ -27,6 +27,8 @@ struct ChatSoundPickerView: View {
                         }
                         .contentShape(Rectangle())
                     }
+                    // Plain row text like a system picker, not link-coloured.
+                    .buttonStyle(.plain)
                     .accessibilityAddTraits(sound == selected ? .isSelected : [])
                 }
             } footer: {
