@@ -4,12 +4,15 @@ struct ChatRoomInfoView: View {
     @State private var viewModel: ChatRoomInfoViewModel
     let onAddMember: () -> Void
     let onLeft: () -> Void
+    let onOpenProfile: (String) -> Void
     private let appContainer: AppContainer
 
     init(
         roomId: String, appContainer: AppContainer,
-        onAddMember: @escaping () -> Void, onLeft: @escaping () -> Void
+        onAddMember: @escaping () -> Void, onLeft: @escaping () -> Void,
+        onOpenProfile: @escaping (String) -> Void
     ) {
+        self.onOpenProfile = onOpenProfile
         _viewModel = State(initialValue: ChatRoomInfoViewModel(roomId: roomId, appContainer: appContainer))
         self.onAddMember = onAddMember
         self.onLeft = onLeft
@@ -44,18 +47,38 @@ struct ChatRoomInfoView: View {
                 }
             }
             Section("Participants") {
+                // Tap the person to open their profile, link icon copies the profile URL (web:
+                // the info panel's member rows). Remove only in groups -- in a 1:1 it would just
+                // end the chat for the other person, which "Leave chat" covers (same as web).
                 ForEach(viewModel.members) { member in
+                    let store = appContainer.matrixClientStore
                     HStack(spacing: 10) {
-                        MatrixAvatarView(
-                            avatarUrl: member.avatarUrl, name: member.displayName, size: 36,
-                            userId: member.userId, appContainer: appContainer
-                        )
-                        Text(member.displayName)
-                        Spacer()
-                        Button("Remove", role: .destructive) {
-                            Task { await viewModel.remove(userId: member.userId) }
+                        let person = HStack(spacing: 10) {
+                            MatrixAvatarView(
+                                avatarUrl: member.avatarUrl, name: member.displayName, size: 36,
+                                userId: member.userId, appContainer: appContainer
+                            )
+                            Text(member.displayName).lineLimit(1)
                         }
-                        .disabled(viewModel.isBusy)
+                        if let nickname = store.friendicaNickname(userId: member.userId) {
+                            Button { onOpenProfile(nickname) } label: { person }
+                                .buttonStyle(.plain)
+                                .accessibilityHint("View profile")
+                        } else {
+                            person
+                        }
+                        Spacer()
+                        if let profileURL = store.friendicaProfileURL(userId: member.userId) {
+                            CopyLinkButton(url: profileURL, compact: true)
+                                .buttonStyle(.borderless)
+                        }
+                        if viewModel.isGroup {
+                            Button("Remove", role: .destructive) {
+                                Task { await viewModel.remove(userId: member.userId) }
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(viewModel.isBusy)
+                        }
                     }
                 }
                 Button("+ Add person", action: onAddMember)

@@ -411,6 +411,24 @@ final class MatrixClientStore {
         return URL(string: base + "photo/avatar/" + encoded + ".jpg")
     }
 
+    /// The Friendica nickname behind a local Matrix user (localpart == lowercased nickname, see
+    /// `friendicaAvatarURL`), nil for a user on another homeserver -- what chat passes to open
+    /// that person's profile (resolved via `accounts/lookup`).
+    func friendicaNickname(userId: String?) -> String? {
+        guard let userId, let serverName, Self.serverName(fromMxid: userId) == serverName else { return nil }
+        return Self.localpart(of: userId)
+    }
+
+    /// Public Larpnet profile URL (`<instance>/profile/<nickname>`) for a local Matrix user --
+    /// what "copy profile link" in chat copies, same as the web client's `profileUrlForUserId()`.
+    func friendicaProfileURL(userId: String?) -> URL? {
+        guard let nickname = friendicaNickname(userId: userId), var base = tokenStore.instanceBaseURL else { return nil }
+        if !base.hasPrefix("http") { base = "https://" + base }
+        if !base.hasSuffix("/") { base += "/" }
+        let encoded = nickname.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? nickname
+        return URL(string: base + "profile/" + encoded)
+    }
+
     /// Settings' chat name style -- also nudges the room list to re-resolve its names now,
     /// rather than only on the next sync.
     func setChatNameDisplay(_ mode: ChatNameDisplay) {
