@@ -35,6 +35,9 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         // room is opened. aps.badge (the server's unread-room count) passes through untouched.
         if let roomId = request.content.userInfo["room_id"] as? String, !roomId.isEmpty {
             bestAttemptContent?.threadIdentifier = roomId
+            // The chat sound picked in Settings (the server always sends "default"). Set before
+            // the fetch, so a timed-out push still gets it.
+            bestAttemptContent?.sound = ChatSound.current.notificationSound
         }
 
         // Pull the two plain strings out of `request` before crossing into the `Task` closure --
