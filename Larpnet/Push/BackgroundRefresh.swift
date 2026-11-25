@@ -135,6 +135,9 @@ enum BackgroundRefresh {
             content.title = notification.account.displayName.isEmpty
                 ? notification.account.username : notification.account.displayName
             content.body = summary(for: notification)
+            if let statusId = notification.status?.id {
+                content.userInfo = ["status_id": statusId]
+            }
             try? await center.add(UNNotificationRequest(identifier: notification.id, content: content, trigger: nil))
         }
     }

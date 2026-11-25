@@ -23,6 +23,8 @@ struct RootView: View {
     @State private var contactsPath: [AppRoute] = []
     @State private var chatPath: [AppRoute] = []
     @State private var morePath: [AppRoute] = []
+    /// Back stack inside the sheet a tapped like/comment notification opens.
+    @State private var pushedThreadPath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
     @State private var showClassicPushPrompt = false
 
@@ -55,7 +57,11 @@ struct RootView: View {
         } message: {
             Text("To get notifications about likes, comments and follows, sign in once more to give the app permission. You can also do this later in Settings.")
         }
-        .sheet(item: $composeContext) { context in
+        // Not while a tapped notification's thread is up -- that sheet presents compose itself.
+        .sheet(item: Binding(
+            get: { appContainer.classicPushStore.pendingStatusId == nil ? composeContext : nil },
+            set: { composeContext = $0 }
+        )) { context in
             ComposeView(context: context, appContainer: appContainer, onPosted: {})
         }
         // A tapped chat notification -- presented over whatever tab is showing, so it works
@@ -75,6 +81,33 @@ struct RootView: View {
                         Button("Close") { appContainer.chatBadgeStore.pendingRoomId = nil }
                     }
                 }
+            }
+        }
+        // A tapped like/comment/mention notification: its post or comment, focused and
+        // highlighted like opening it from the Notifications list -- also presented over
+        // whatever tab is showing. A full tab stack, so links in the thread still push.
+        .sheet(item: Binding(
+            get: { appContainer.classicPushStore.pendingStatusId.map(PendingStatus.init) },
+            set: { appContainer.classicPushStore.pendingStatusId = $0?.id }
+        ), onDismiss: { pushedThreadPath = []; composeContext = nil }) { pending in
+            tabStack(path: $pushedThreadPath) {
+                ThreadView(
+                    statusId: pending.id, appContainer: appContainer,
+                    onOpenThread: { pushedThreadPath.append(.thread(statusId: $0.id)) },
+                    onOpenProfile: { pushedThreadPath.append(.profile(accountId: $0)) },
+                    onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                    onOpenHashtag: { pushedThreadPath.append(.hashtag($0)) }
+                )
+                .id(pending.id)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") { appContainer.classicPushStore.pendingStatusId = nil }
+                    }
+                }
+            }
+            // RootView's own compose sheet can't show while this one is up.
+            .sheet(item: $composeContext) { context in
+                ComposeView(context: context, appContainer: appContainer, onPosted: {})
             }
         }
     }
@@ -456,5 +489,9 @@ struct RootView: View {
 
 /// `Identifiable` wrapper for `ChatBadgeStore.pendingRoomId`, for `.sheet(item:)`.
 private struct PendingChatRoom: Identifiable {
+    let id: String
+}
+
+private struct PendingStatus: Identifiable {
     let id: String
 }
