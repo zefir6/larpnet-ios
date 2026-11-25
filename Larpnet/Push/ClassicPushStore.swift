@@ -15,6 +15,9 @@ import os
 final class ClassicPushStore {
     private(set) var needsSignIn: Bool
     private(set) var isSigningIn = false
+    /// The post or comment a tapped like/comment/mention notification points at (Mastodon
+    /// status id, the push's `status_id`): `RootView` opens it in a sheet.
+    var pendingStatusId: String?
 
     private let tokenStore: TokenStore
     private let friendicaAPI: () throws -> FriendicaAPIClient

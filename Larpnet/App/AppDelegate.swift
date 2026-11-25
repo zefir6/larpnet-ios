@@ -44,16 +44,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     /// Tapping a chat notification opens that room (`RootView` presents
-    /// `ChatBadgeStore.pendingRoomId`).
+    /// `ChatBadgeStore.pendingRoomId`); tapping a like/comment/mention one opens its post or
+    /// comment (`status_id`, sent by friendica-larpnet's `larpnet_apns` and set on
+    /// `BackgroundRefresh`'s local ones; `RootView` presents `ClassicPushStore.pendingStatusId`).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
-        let roomId = response.notification.request.content.userInfo["room_id"] as? String
+        let userInfo = response.notification.request.content.userInfo
+        let roomId = userInfo["room_id"] as? String
+        let statusId = userInfo["status_id"] as? String
         Task { @MainActor in
             if let roomId, !roomId.isEmpty {
                 self.appContainer?.chatBadgeStore.pendingRoomId = roomId
+            } else if let statusId, !statusId.isEmpty {
+                self.appContainer?.classicPushStore.pendingStatusId = statusId
             }
             completionHandler()
         }
