@@ -11,7 +11,7 @@ struct ComposeView: View {
     let onPosted: () -> Void
 
     init(context: ComposeContext, appContainer: AppContainer, onPosted: @escaping () -> Void) {
-        _viewModel = State(initialValue: ComposeViewModel(replyToId: context.replyToId, appContainer: appContainer))
+        _viewModel = State(initialValue: ComposeViewModel(replyToId: context.replyToId, initialText: context.initialText, appContainer: appContainer))
         self.onPosted = onPosted
     }
 
