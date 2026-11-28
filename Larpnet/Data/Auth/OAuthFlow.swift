@@ -68,8 +68,9 @@ final class OAuthFlow: NSObject {
     }
 
     /// Cached in `TokenStore` so re-login to the same instance skips re-registration, same as
-    /// Android's `ensureAppRegistered`.
-    private func ensureAppRegistered(baseURL: URL, authAPI: AuthAPI) async throws -> AppRegistration {
+    /// Android's `ensureAppRegistered`. Also used by in-app registration (`RegisterViewModel`),
+    /// whose API calls carry these client credentials.
+    func ensureAppRegistered(baseURL: URL, authAPI: AuthAPI) async throws -> AppRegistration {
         if tokenStore.instanceBaseURL == baseURL.absoluteString,
            let clientId = tokenStore.clientId,
            let clientSecret = tokenStore.clientSecret {

@@ -2,12 +2,15 @@ import SwiftUI
 
 struct LoginView: View {
     @State private var viewModel: LoginViewModel
+    @State private var showsRegistration = false
+    private let appContainer: AppContainer
     let onLoggedIn: () -> Void
 
     init(appContainer: AppContainer, onLoggedIn: @escaping () -> Void) {
         _viewModel = State(initialValue: LoginViewModel(
             oAuthFlow: appContainer.oAuthFlow, tokenStore: appContainer.tokenStore
         ))
+        self.appContainer = appContainer
         self.onLoggedIn = onLoggedIn
     }
 
@@ -23,6 +26,13 @@ struct LoginView: View {
                 Button("Log in") { viewModel.login() }
                     .buttonStyle(.borderedProminent)
                     .tint(LarpnetTheme.navBar)
+                Text("Don't have an account yet?")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 24)
+                Button("Create account") { showsRegistration = true }
+                    .buttonStyle(.bordered)
+                    .tint(LarpnetTheme.navBar)
             case .awaitingBrowser, .exchangingToken:
                 ProgressView("Opening browser…")
             case .error(let message):
@@ -37,6 +47,16 @@ struct LoginView: View {
                 ProgressView()
             }
             Spacer()
+        }
+        .sheet(isPresented: $showsRegistration) {
+            RegisterView(
+                appContainer: appContainer,
+                onLoggedIn: {
+                    showsRegistration = false
+                    onLoggedIn()
+                },
+                onLogIn: { viewModel.login() }
+            )
         }
         .onChange(of: viewModel.uiState) { _, newValue in
             if newValue == .loggedIn { onLoggedIn() }

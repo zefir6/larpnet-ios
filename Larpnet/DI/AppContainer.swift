@@ -52,6 +52,10 @@ final class AppContainer: @unchecked Sendable {
         AuthAPI(baseURL: baseURL, session: apiSession)
     }
 
+    func registrationAPI(baseURL: URL) -> RegistrationAPI {
+        RegistrationAPI(baseURL: baseURL, session: apiSession)
+    }
+
     lazy var oAuthFlow = OAuthFlow(tokenStore: tokenStore, authAPIFactory: { [apiSession] baseURL in
         AuthAPI(baseURL: baseURL, session: apiSession)
     })
