@@ -42,5 +42,7 @@ enum AppRoute: Hashable {
 /// doc's "Screens & navigation" section).
 struct ComposeContext: Identifiable {
     let replyToId: String?
-    var id: String { replyToId ?? "new" }
+    /// Prefilled text, from a `web+mastodon://share` link.
+    var initialText: String? = nil
+    var id: String { replyToId ?? (initialText.map { "share-\($0.hashValue)" } ?? "new") }
 }

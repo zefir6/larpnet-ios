@@ -48,6 +48,8 @@ struct StatusCard: View {
     var onDelete: ((Status) -> Void)? = nil
 
     @Environment(\.moderationActions) private var moderationActions
+    /// RootView's link handler (LinkStore), for links that aren't this post's hashtags.
+    @Environment(\.openURL) private var parentOpenURL
     @State private var galleryContext: MediaGalleryContext?
 
     private var displayed: Status { status.reblog ?? status }
@@ -110,11 +112,13 @@ struct StatusCard: View {
             // without this, tapping one falls through to the system default and opens Safari,
             // while the tag chip row below opens the in-app hashtag timeline for the exact same
             // tag. Intercepting here makes both affordances behave identically; anything that
-            // isn't a recognized tag link (mentions, external URLs) still falls through to
-            // `.systemAction`, unchanged from today.
+            // isn't a recognized tag link (mentions, fediverse and external URLs) goes to
+            // RootView's handler, which opens fediverse posts/profiles natively.
             .environment(\.openURL, OpenURLAction { url in
                 guard let tag = displayed.tags.first(where: { $0.url == url.absoluteString }) else {
-                    return .systemAction
+                    // Mentions, fediverse and other links: RootView's handler (LinkStore).
+                    parentOpenURL(url)
+                    return .handled
                 }
                 onOpenHashtag(tag.name)
                 return .handled

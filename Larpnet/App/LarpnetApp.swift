@@ -65,6 +65,12 @@ struct LarpnetApp: App {
                     })
                 }
             }
+            // Universal Links (larpnet.pl/display/..., /profile/...) and the larpnet://,
+            // web+mastodon:// and web+ap:// schemes -- see LinkStore.
+            .onOpenURL { appContainer.linkStore.open($0, fromOutside: true) }
+            .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                if let url = activity.webpageURL { appContainer.linkStore.open(url, fromOutside: true) }
+            }
             .environment(\.imageLoader, appContainer.imageLoader)
             .environment(\.font, LarpnetTheme.bodyFont)
             .tint(LarpnetTheme.accent)

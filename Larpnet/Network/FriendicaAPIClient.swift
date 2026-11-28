@@ -65,6 +65,17 @@ final class FriendicaAPIClient: Sendable {
         ])
     }
 
+    /// With an http(s) URL as `query`, the server fetches that post or account from its home
+    /// instance (Search::searchLinks) and returns it with a local id -- how fediverse links
+    /// open natively (`LinkStore`).
+    func search(query: String, resolve: Bool = true, limit: Int = 1) async throws -> SearchResults {
+        try await send(path: "api/v2/search", query: [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "resolve", value: resolve ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ])
+    }
+
     /// No Link-header pagination on this endpoint (Friendica's `Directory.php` just does
     /// `jsonExit`) -- callers page via a client-tracked `offset`, matching Android's
     /// `DirectoryViewModel`.
