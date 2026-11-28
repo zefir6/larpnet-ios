@@ -25,6 +25,8 @@ struct RootView: View {
     @State private var morePath: [AppRoute] = []
     /// Back stack inside the sheet a tapped like/comment notification opens.
     @State private var pushedThreadPath: [AppRoute] = []
+    /// Back stack inside the sheet an opened link (LinkStore) shows.
+    @State private var linkPath: [AppRoute] = []
     @State private var composeContext: ComposeContext?
     @State private var showClassicPushPrompt = false
 
@@ -43,6 +45,50 @@ struct RootView: View {
                 .tag("more")
         }
         .tint(LarpnetTheme.accent)
+        // Links tapped anywhere below (post bodies, profile bios): fediverse posts and
+        // profiles open natively, the rest in Safari. StatusCard hands non-hashtag links here.
+        .environment(\.openURL, OpenURLAction { url in
+            appContainer.linkStore.open(url, fromOutside: false)
+            return .handled
+        })
+        .overlay(alignment: .top) {
+            if appContainer.linkStore.isResolving {
+                ProgressView()
+                    .padding(10)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.top, 8)
+            }
+        }
+        .alert(
+            appContainer.linkStore.failureMessage ?? "",
+            isPresented: Binding(
+                get: { appContainer.linkStore.failureMessage != nil },
+                set: { if !$0 { appContainer.linkStore.failureMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        }
+        .onChange(of: appContainer.linkStore.pendingShareText) { _, text in
+            guard let text else { return }
+            composeContext = ComposeContext(replyToId: nil, initialText: text)
+            appContainer.linkStore.pendingShareText = nil
+        }
+        // An opened link's post, profile or hashtag, over whatever tab is showing (like a
+        // tapped notification below).
+        .sheet(item: Binding(
+            get: { appContainer.linkStore.pending },
+            set: { appContainer.linkStore.pending = $0 }
+        ), onDismiss: { linkPath = [] }) { destination in
+            tabStack(path: $linkPath) {
+                linkRoot(destination.route, path: $linkPath)
+                    .id(destination.id)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Close") { appContainer.linkStore.pending = nil }
+                        }
+                    }
+            }
+        }
         // Once per login: an older login lacks the `push` scope (see `ClassicPushStore`).
         // Settings keeps offering the same button afterwards.
         .onChange(of: appContainer.classicPushStore.needsSignIn, initial: true) { _, needsSignIn in
@@ -330,6 +376,44 @@ struct RootView: View {
         Task {
             guard let account = try? await appContainer.friendicaAPI().lookupLocalAccount(nickname: nickname) else { return }
             path.wrappedValue.append(.profile(accountId: account.id))
+        }
+    }
+
+    /// The first screen of the link sheet -- the same views the tab stacks push.
+    @ViewBuilder
+    private func linkRoot(_ route: AppRoute, path: Binding<[AppRoute]>) -> some View {
+        switch route {
+        case .thread(let statusId):
+            ThreadView(
+                statusId: statusId, appContainer: appContainer,
+                onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
+                onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) }
+            )
+        case .profile(let accountId):
+            ProfileView(
+                accountId: accountId, appContainer: appContainer,
+                onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
+                onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                onEditProfile: { path.wrappedValue.append(.editProfile) },
+                onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) },
+                onOpenAlbums: { path.wrappedValue.append(.destination(.albums)) },
+                onOpenChat: { path.wrappedValue.append(.chatThread(.nickname($0))) }
+            )
+        case .hashtag(let tag):
+            TimelineView(
+                kind: .hashtag(tag), appContainer: appContainer,
+                onOpenThread: { path.wrappedValue.append(.thread(statusId: $0.id)) },
+                onOpenProfile: { path.wrappedValue.append(.profile(accountId: $0)) },
+                onReply: { composeContext = ComposeContext(replyToId: $0.id) },
+                onOpenHashtag: { path.wrappedValue.append(.hashtag($0)) }
+            )
+            .navigationTitle("#\(tag)")
+            .navigationBarTitleDisplayMode(.inline)
+        default:
+            EmptyView()
         }
     }
 

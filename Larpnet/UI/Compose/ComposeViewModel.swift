@@ -76,9 +76,10 @@ final class ComposeViewModel {
         }
     }
 
-    init(replyToId: String?, appContainer: AppContainer) {
+    init(replyToId: String?, initialText: String? = nil, appContainer: AppContainer) {
         self.replyToId = replyToId
         self.appContainer = appContainer
+        self.text = initialText ?? ""
     }
 
     var canPublish: Bool {
